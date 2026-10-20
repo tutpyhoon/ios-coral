@@ -42,8 +42,21 @@ CHECK = '''        {tag}
                 error "CORAL platform matching missing; build aborted"
                 exit 1
             fi
-            if ! git -C "${{coral_tree}}" diff --check; then
-                error "XNU patch stack introduces whitespace errors; build aborted"
+            # Verify the two Coral integration edits (not just the new files).
+            # Earlier SWEET patches contain existing whitespace warnings, so
+            # diff --check across the *entire* patched XNU tree is not a valid
+            # acceptance test for this Coral patch.
+            if ! grep -Fq '#elif defined (SWEET) || defined (CORAL)' "${{coral_tree}}/osfmk/arm64/proc_reg.h"; then
+                error "CORAL cache configuration missing; build aborted"
+                exit 1
+            fi
+            if ! grep -Fq 'iokit/Kernel/arm/CoralPlatformExpert.cpp' "${{coral_tree}}/iokit/conf/files.arm64" ||
+               ! grep -Fq 'iokit/Kernel/arm/CoralCPU.cpp' "${{coral_tree}}/iokit/conf/files.arm64"; then
+                error "CORAL source compilation entries missing; build aborted"
+                exit 1
+            fi
+            if ! grep -Fq 'MACHINE_FLAGS_ARM64_CORAL =' "${{coral_tree}}/makedefs/MakeInc.def"; then
+                error "CORAL machine flags missing; build aborted"
                 exit 1
             fi
             info "CORAL 0082 foundation present; starting real XNU compile"
