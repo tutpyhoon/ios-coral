@@ -1,3 +1,4 @@
+# Fork workflow registration refresh (comment only; build behavior unchanged)
 name: xnu
 
 on:
