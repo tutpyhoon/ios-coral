@@ -95,7 +95,7 @@ diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
  iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
  iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
  iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
- iokit/Kernel/arm/SweetSurface.cpp
+ iokit/Kernel/arm/SweetSurface.cpp                                optional iokitcpp
 diff --git a/pexpert/pexpert/arm64/CORAL.h b/pexpert/pexpert/arm64/CORAL.h
 new file mode 100644
 --- /dev/null
