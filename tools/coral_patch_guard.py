@@ -74,7 +74,15 @@ CHECK = '''        {tag}
                 error "CORAL kperf/kpc master options missing; build aborted"
                 exit 1
             fi
-            info "CORAL 0082/0083/0084 foundations present; starting real XNU compile"
+            if ! grep -Fq '#if defined(SWEET) || defined(ARM64_BOARD_CONFIG_CORAL)' "${{coral_tree}}/osfmk/arm64/machine_routines.c"; then
+                error "CORAL 0085 monitor hook missing; build aborted"
+                exit 1
+            fi
+            if ! grep -Fq '#else /* CORAL: no SWEET process sampler */' "${{coral_tree}}/bsd/dev/sweet_sample.c"; then
+                error "CORAL 0085 sampler isolation missing; build aborted"
+                exit 1
+            fi
+            info "CORAL 0082/0083/0084/0085 foundations present; starting real XNU compile"
         fi
 '''.format(tag=TAG)
 

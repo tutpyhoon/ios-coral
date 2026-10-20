@@ -1,0 +1,43 @@
+diff --git a/osfmk/arm64/machine_routines.c b/osfmk/arm64/machine_routines.c
+--- a/osfmk/arm64/machine_routines.c
++++ b/osfmk/arm64/machine_routines.c
+@@ -2166,6 +2166,6 @@ ml_get_decrementer(void)
+ }
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(ARM64_BOARD_CONFIG_CORAL)
+ /*
+  * sweet: arm_vm_init() calls this unconditionally; Apple's definition (it
+  * enters the PPL/monitor) ships only in the closed per-SoC library. There is
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -19,9 +19,11 @@
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <pexpert/pexpert.h>
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++
+ extern task_t proc_task(proc_t);
+ extern int hz;
+ extern void sweet_sample_start(void);
+ 
+ static char sweet_sample_names[128];
+@@ -81,8 +83,16 @@
+ void
+ sweet_sample_start(void)
+ {
+ 	thread_t thread;
+ 	if (kernel_thread_start(sweet_sample_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ }
++
++#else /* CORAL: no SWEET process sampler */
++extern void sweet_sample_start(void);
++void
++sweet_sample_start(void)
++{
++}
++#endif /* ARM64_BOARD_CONFIG_SWEET */
