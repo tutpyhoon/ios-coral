@@ -59,7 +59,13 @@ CHECK = '''        {tag}
                 error "CORAL machine flags missing; build aborted"
                 exit 1
             fi
-            info "CORAL 0082 foundation present; starting real XNU compile"
+            if ! grep -Fq 'QUALCOMM_VTIMER_INTID' "${{coral_tree}}/pexpert/arm/pe_fiq.c" ||
+               ! grep -Fq 'coral_vtimer_intid' "${{coral_tree}}/pexpert/pexpert/arm/protos.h" ||
+               ! grep -Fq 'if (intid == coral_vtimer_intid)' "${{coral_tree}}/osfmk/arm64/sleh.c"; then
+                error "CORAL 0083 GIC Group 1 integration missing; build aborted"
+                exit 1
+            fi
+            info "CORAL 0082/0083 foundations present; starting real XNU compile"
         fi
 '''.format(tag=TAG)
 
