@@ -1,0 +1,127 @@
+# CORAL XNU GICv3 Group 1 integration: apply after 0082.
+# SWEET and Coral use distinct timer INTID variables; Group 0 remains with TrustZone.
+diff --git a/pexpert/arm/pe_fiq.c b/pexpert/arm/pe_fiq.c
+--- a/pexpert/arm/pe_fiq.c
++++ b/pexpert/arm/pe_fiq.c
+@@ -17,9 +17,23 @@
+ #define GICR_WAKE_TIMEOUT_NS (1000000000ULL) // timeout for redistributor wakeup (default 1s)
+ MACHINE_TIMEOUT(gicr_wake_timeout_ns, "gicr-wake-timeout", GICR_WAKE_TIMEOUT_NS, MACHINE_TIMEOUT_UNIT_NSEC, NULL);
+ 
++/*
++ * On Qualcomm targets XNU must use the non-secure GIC Group 1 path.
++ * Keep separate timer variables: neither target inherits the other's
++ * hardware timer selection or device-tree properties.
++ */
+ #if defined(SWEET)
++#define QUALCOMM_VTIMER_INTID sweet_vtimer_intid
++#define QUALCOMM_IPI_SGI SWEET_IPI_SGI
++#define QUALCOMM_GIC_NAME "SWEET"
+ /* Phone default; QEMU virt wires the architected virtual timer to INTID 27. */
+ SECURITY_READ_ONLY_LATE(uint32_t) sweet_vtimer_intid = SWEET_VTIMER_INTID;
++#elif defined(CORAL)
++#define QUALCOMM_VTIMER_INTID coral_vtimer_intid
++#define QUALCOMM_IPI_SGI CORAL_IPI_SGI
++#define QUALCOMM_GIC_NAME "CORAL"
++/* Pixel 4 XL: virtual timer PPI 3 is INTID 19 per the live device tree. */
++SECURITY_READ_ONLY_LATE(uint32_t) coral_vtimer_intid = CORAL_VTIMER_INTID;
+ #endif
+ 
+ static vm_offset_t gicd_base;
+@@ -102,7 +116,7 @@
+ 			panic("%s: incorrect reg property size in GIC DT node; expecting 32 bytes but got %u bytes", __func__, prop_size);
+ 		}
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(CORAL)
+ 		/* Read only on the boot CPU, before the GIC and RO-late lockdown. */
+ 		void const *timer_prop;
+ 		unsigned int timer_size;
+@@ -114,9 +128,9 @@
+ 			if (intid < 16 || intid >= 32) {
+ 				panic("%s: virtual timer INTID %u is not a PPI", __func__, intid);
+ 			}
+-			sweet_vtimer_intid = intid;
+-		}
+-		kprintf("SWEET GIC: virtual timer INTID %u\n", sweet_vtimer_intid);
++			QUALCOMM_VTIMER_INTID = intid;
++		}
++		kprintf("%s GIC: virtual timer INTID %u\n", QUALCOMM_GIC_NAME, QUALCOMM_VTIMER_INTID);
+ #endif
+ 
+ 		vm_offset_t soc_base_phys = pe_arm_get_soc_base_phys();
+@@ -164,7 +178,7 @@
+ 		}
+ 	}
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(CORAL)
+ 	/*
+ 	 * Real hardware with two security states: Group 0 is TrustZone's and
+ 	 * non-secure writes to it are ignored. Everything we own is Group 1 NS
+@@ -175,7 +189,7 @@
+ 	for (unsigned int i = 0; i < 32; i += 4) {
+ 		gicr_write32(GICR_IPRIORITYR0 + i, 0xA0A0A0A0);
+ 	}
+-	gicr_write32(GICR_ISENABLER0, (1U << sweet_vtimer_intid) | (1U << SWEET_IPI_SGI));
++	gicr_write32(GICR_ISENABLER0, (1U << QUALCOMM_VTIMER_INTID) | (1U << QUALCOMM_IPI_SGI));
+ #else
+ 	// Configure timers and legacy FIQ to be group 0
+ 	gicr_write32(GICR_IGROUPR0, 0x81FFFFFF);
+@@ -190,7 +204,7 @@
+ 	__builtin_arm_wsr64("ICC_SRE_EL1", icc_sre);
+ 	__builtin_arm_isb(ISB_SY);
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(CORAL)
+ 	__builtin_arm_wsr64("ICC_BPR1_EL1", 0);
+ #else
+ 	// Set priority masks and binary point for group 0
+@@ -203,7 +217,8 @@
+ 	icc_ctlr &= ~ICC_CTLR_EOIMODE;
+ 	__builtin_arm_wsr64("ICC_CTLR_EL1", icc_ctlr);
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(CORAL)
++	/* Enable non-secure Group 1 forwarding; Group 0 remains with firmware. */
+ 	// ABL leaves only ARE_NS set; Linux writes ARE_NS | EnableGrp1A | EnableGrp1
+ 	uint32_t gicd_ctlr = gicd_read32(GICD_CTLR);
+ 	gicd_ctlr |= GICD_CTLR_ARE_NS | GICD_CTLR_ENABLEGRP1A | GICD_CTLR_ENABLEGRP1;
+diff --git a/pexpert/pexpert/arm/protos.h b/pexpert/pexpert/arm/protos.h
+--- a/pexpert/pexpert/arm/protos.h
++++ b/pexpert/pexpert/arm/protos.h
+@@ -38,6 +38,8 @@
+ void pe_init_fiq(void);
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ extern uint32_t sweet_vtimer_intid;
++#elif defined(ARM64_BOARD_CONFIG_CORAL)
++extern uint32_t coral_vtimer_intid;
+ #endif
+ 
+ #ifdef PRIVATE
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1856,9 +1856,9 @@
+ #endif
+ 
+ 
+-#if defined(SWEET)
++#if defined(SWEET) || defined(CORAL)
+ 	/*
+-	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
++	 * Qualcomm: TrustZone owns GIC Group 0, so the timer and IPIs that other
+ 	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
+ 	 */
+ 	uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
+@@ -1867,7 +1867,11 @@
+ 	if (intid >= 1020 && intid <= 1023) {
+ 		return; /* spurious */
+ 	}
++#if defined(CORAL)
++	if (intid == coral_vtimer_intid) {
++#else
+ 	if (intid == sweet_vtimer_intid) {
++#endif
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
+ 		cdp->cpu_decrementer = -1; /* Large */
+ 		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
