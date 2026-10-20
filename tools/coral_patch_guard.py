@@ -70,6 +70,10 @@ CHECK = '''        {tag}
                 error "CORAL 0084 master config missing open-source ARM64 assembly and pmap"
                 exit 1
             fi
+            if ! grep -Fq 'PERFMON_BASE kperf kpc ]' "${{coral_tree}}/config/MASTER.arm64.coral"; then
+                error "CORAL kperf/kpc master options missing; build aborted"
+                exit 1
+            fi
             info "CORAL 0082/0083/0084 foundations present; starting real XNU compile"
         fi
 '''.format(tag=TAG)
