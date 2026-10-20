@@ -21,11 +21,17 @@ diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
 diff --git a/osfmk/arm64/proc_reg.h b/osfmk/arm64/proc_reg.h
 --- a/osfmk/arm64/proc_reg.h
 +++ b/osfmk/arm64/proc_reg.h
-@@ -213,3 +213,3 @@
+@@ -212,9 +212,9 @@
+ 
+ /* D-Cache. */
  #define MMU_CLINE   6
  
 -#elif defined (SWEET) /* Qualcomm Kryo 470: Cortex-A76 + Cortex-A55 */
 +#elif defined (SWEET) || defined (CORAL) /* ARMv8.2 Kryo: 64-byte cache lines */
+ 
+ /* I-Cache. */
+ #define MMU_I_CLINE 6
+ 
 diff --git a/pexpert/pexpert/arm64/Makefile b/pexpert/pexpert/arm64/Makefile
 --- a/pexpert/pexpert/arm64/Makefile
 +++ b/pexpert/pexpert/arm64/Makefile
@@ -77,12 +83,19 @@ diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
 diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
 --- a/iokit/conf/files.arm64
 +++ b/iokit/conf/files.arm64
-@@ -11,1 +11,5 @@
+@@ -9,8 +9,12 @@
+ # SWEET device-tree platform (empty translation unit on other boards)
+ iokit/Kernel/arm/SweetPlatformExpert.cpp                         optional iokitcpp
+ 
  iokit/Kernel/arm/SweetCPU.cpp                                    optional iokitcpp
 +
 +# CORAL bring-up source, active only with ARM64_BOARD_CONFIG_CORAL
 +iokit/Kernel/arm/CoralPlatformExpert.cpp                         optional iokitcpp
 +iokit/Kernel/arm/CoralCPU.cpp                                    optional iokitcpp
+ iokit/Kernel/arm/SweetEntitlements.cpp                           optional iokitcpp
+ iokit/Kernel/arm/SweetKeyStore.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetWatchdog.cpp                               optional iokitcpp
+ iokit/Kernel/arm/SweetSurface.cpp
 diff --git a/pexpert/pexpert/arm64/CORAL.h b/pexpert/pexpert/arm64/CORAL.h
 new file mode 100644
 --- /dev/null
