@@ -65,7 +65,12 @@ CHECK = '''        {tag}
                 error "CORAL 0083 GIC Group 1 integration missing; build aborted"
                 exit 1
             fi
-            info "CORAL 0082/0083 foundations present; starting real XNU compile"
+            if [[ ! -s "${{coral_tree}}/config/MASTER.arm64.coral" ]] ||
+               ! grep -Fq 'nos_arm_asm nos_arm_pmap' "${{coral_tree}}/config/MASTER.arm64.coral"; then
+                error "CORAL 0084 master config missing open-source ARM64 assembly and pmap"
+                exit 1
+            fi
+            info "CORAL 0082/0083/0084 foundations present; starting real XNU compile"
         fi
 '''.format(tag=TAG)
 
