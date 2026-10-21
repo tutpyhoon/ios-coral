@@ -1,0 +1,112 @@
+name: CORAL first XNU kernel entry 08 (UNTESTED)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-xnu-first-entry]
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+      EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+      EXPECTED_PAYLOAD_SHA: d251a7c4897c66eef7a651091513921e39f5b01feb74c1fce3dd7351c2c44ed8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download original successful storage-free CORAL XNU artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fetch exact source and apply CORAL entry instrumentation
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/first_entry08.py source
+      - name: Install host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Verify exactly pinned storage-free kernel and payload
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          d=Path("coral-kernel")
+          kernel=d/"kernel.development.sweet"
+          assert hashlib.sha256(kernel.read_bytes()).hexdigest()==os.environ["EXPECTED_KERNEL_SHA"]
+          assert "kernel.development.sweet" in (d/"SHA256SUMS").read_text()
+          assert (d/"xnu-commit.txt").read_text().strip()=="1b191cb58250d0705d8a51287127505aa4bc0789"
+          assert (d/"port-commit.txt").read_text().strip()=="65ec12ed2d6fde38aa5868f8637075954814cc14"
+          print("PASS: original pinned minimal XNU kernel SHA and source provenance")
+          PY
+      - name: Build and host-check experimental first-entry image
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          python3 flame/pack_kernel.py ../coral-kernel
+          bash flame/build.sh 08 "$PWD/flame/out/flame-early.payload"
+          python3 flame/check.py 08
+      - name: Check controlled kernel handoff is present and no rootfs is included
+        run: |
+          python3 - <<'PY'
+          import json, os, hashlib
+          from pathlib import Path
+          src=Path("source/flame/probe.c").read_text()
+          assert "XNU ENTRY START IN 15 SECONDS" in src
+          assert "JUMPING TO XNU - CAPTURE SCREEN" in src
+          assert "payload_materialize(payload, &plan, FLAME_RAM_BASE);" in src
+          assert "((void (*)(uint64_t))(uintptr_t)(FLAME_RAM_BASE + plan.entry))" in src
+          assert "PROBE_PREFLIGHT_ONLY" not in src
+          j=json.loads(Path("source/flame/out/flame-early-manifest.json").read_text())
+          assert j["kernel_sha256"]==os.environ["EXPECTED_KERNEL_SHA"]
+          assert j["payload_sha256"]==os.environ["EXPECTED_PAYLOAD_SHA"]
+          assert j["ram_init_sha256"] is None and j["ram_root_sha256"] is None
+          assert j["hfs_root"] is False and j["kernel"]["ramdisk"] is None
+          print("PASS: XNU copy/jump in source, original payload SHA, no init/root")
+          PY
+          aarch64-linux-gnu-readelf -r source/flame/out/probe.o | grep -q payload_materialize
+          aarch64-linux-gnu-objdump -d source/flame/out/probe.o | grep -E '[[:space:]]blr[[:space:]]' >/dev/null
+          echo "PASS: object calls payload_materialize and contains indirect entry branch"
+      - name: Package experimental image with test notes
+        run: |
+          mkdir -p coral-first-entry-08
+          cp source/flame/out/flame-probe-08.img coral-first-entry-08/coral-first-xnu-entry-08-UNTESTED.img
+          cp source/flame/out/flame-early-manifest.json coral-first-entry-08/manifest.json
+          cp source/flame/coral-profile.json coral-first-entry-08/profile.json
+          cat > coral-first-entry-08/README.txt <<'EOF'
+          CORAL FIRST XNU EXECUTION ATTEMPT / 08 -- EXPERIMENTAL AND UNTESTED
+
+          Physical target: already-unlocked Pixel 4 XL, product coral.
+          This test WILL copy ~33 MiB of XNU/ADT/boot args into candidate RAM
+          and JUMP TO XNU. Firmware hang, black screen, reset or a frozen
+          phone are possible. The 1 GiB RAM window was NOT exhaustively tested.
+          Kernel framebuffer stride 5760 is inferred, not independently proven.
+          This image is NOT a working iOS install; no RAM or HFS root included.
+          Not intended to boot the iOS home screen.
+
+          Before boot, fully back up Android data and verify product==coral.
+          Use fastboot boot only -- NEVER fastboot flash.
+          Photograph the last visible output at the 15-second pre-entry pause
+          and again if XNU shows any new output. The XNU boot attempt has no
+          reliable automatic-reset timer. If it freezes, use hardware forced
+          restart; do not format, wipe, flash or unlock anything.
+          Existing Android partitions are not intentionally written.
+          EOF
+          (cd coral-first-entry-08 && sha256sum *.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-first-xnu-entry-08-UNTESTED
+          path: coral-first-entry-08/
+          retention-days: 14
+          if-no-files-found: error
