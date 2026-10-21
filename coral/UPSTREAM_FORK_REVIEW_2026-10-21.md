@@ -75,3 +75,26 @@ not independent proof of the features on Pixel 4 XL.
 5. Do not make GPU, UFS, or multi-core changes before basic RAM-HFS
    behavior is proven on CORAL.
 
+
+## Confirmed QEMU execution result (2026-10-21)
+
+[GitHub Actions run 39687739791](https://github.com/tutpyhoon/ios-coral/actions/runs/39687739791)
+PASSED on the host using pinned source-built XNU SHA-256
+`2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4`.
+QEMU 8.2.2 ran 95 seconds with a RAM-only HFS root
+SHA-256 `d285081cacd10ff310bffb4e5f56b2fe07363aa08550e2db867c5fa726f798ba`.
+CI output, copied from `result.json`:
+
+- `status: no_panic_observed`, `unknown_glyphs: 0`
+- `kva_active: 1`, `framebuffer_handoff_verified: true`
+- `hfs_mounted: true`, `filesystem_read_verified: true`
+- `userspace_pid1_visible: true`, `userspace_heartbeats: 6`
+- `filesystem_read_failed: false`, `waiting_for_root: false`
+
+Evidence artifact `coral-hfs-phase10-qemu-evidence` (artifact ID
+`12386862947`) includes `fb.png`, `fb.txt`, `qemu.log`, registers,
+and JSON results. This validates a *simulation* of Phase10's HFS RAM-root
+path and reduces host-side risk; it does NOT certify the real Qualcomm
+boot environment or prove the Phase10 image boots on the Pixel.
+Phase 10 physical hardware test remains pending.
+
