@@ -43,7 +43,7 @@ that the bootloader accepted the image, not that the diagnostic ran.
 
 Go to the [CORAL temporary boot probes workflow](https://github.com/tutpyhoon/ios-coral/actions/workflows/coral-probes.yml),
 choose branch `coral-home-screen`, and open the successful run. Its
-`coral-safe-probes` artifact includes both `.img` files and
+`coral-safe-probes` artifact includes all four `.img` files and
 `manifest.json` with SHA-256 hashes. **Only proceed if the build/host checks
 pass and the hashes match**.
 
@@ -102,7 +102,4 @@ try to run the existing CORAL kernel merely because host tests passed.
    kernel-to-userland boot, HFS+ root, launchd, backboardd and SpringBoard.
    Destructive iOS installation would require explicit approval and backups.
 
-**Current checkpoint:** source-built CORAL kernel compiles; hardware stages
-1–4 are not yet proven. Do not run Redmi `shim/build.sh` / `mkadt.py` with
-hardcoded SWEET addresses on a Pixel 4 XL. The original upstream instructions
-for formatting userdata are **not** valid for CORAL.
+**Current checkpoint (2026-10-20):** Probes 01–04 have produced visible results on a physical Pixel 4 XL. Memory-map checks, the bounded two-page RAM restore test, and the temporary 16 KiB MMU translation test passed; the user confirmed return to Android after each. These results do **not** establish a full 1 GiB ownership guarantee or a booted XNU kernel. The separately built CORAL XNU kernel compiled in CI, but its physical execution has **not** been shown. See [Phase 05 preparation](PHASE05.md), [measured hardware observations](hardware_observations.json), and [the host consistency check](check_hardware.py). Do not run Redmi `shim/build.sh` / `mkadt.py` with hardcoded SWEET addresses on a Pixel 4 XL. The original upstream instructions for formatting userdata are **not** valid for CORAL.
