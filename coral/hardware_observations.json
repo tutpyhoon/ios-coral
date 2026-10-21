@@ -1,0 +1,67 @@
+{
+  "device": "Google Pixel 4 XL (coral / SM8150)",
+  "provenance": "User photographs of temporarily booted coral-probe-01..04, 2026-10-20. Static observational record, NOT a substitute for validating the live FDT.",
+  "probe01": {
+    "current_el": 1,
+    "midr_el1": "0x51DF805E",
+    "mpidr_el1": "0x81000000",
+    "tgran16_field": 1,
+    "cntfrq_el0_hz": 19200000,
+    "psci_version": "0x00010001",
+    "fdt_base": "0x84500000",
+    "fdt_total_size": "0x000ACB47",
+    "splash_base": "0x9C400000",
+    "splash_reserved_size": "0x02400000",
+    "drawn_width_px": 1440,
+    "drawn_height_px": 3040,
+    "note": "The probe uses contiguous 1440-pixel rows; physical row pitch was not independently measured.",
+    "ram_banks": [
+      {
+        "base": "0x80000000",
+        "size": "0x3CC00000"
+      },
+      {
+        "base": "0xC0000000",
+        "size": "0x140000000"
+      }
+    ],
+    "no_partition_writes_reported": true
+  },
+  "probe02": {
+    "candidate_base": "0x100000000",
+    "candidate_size": "0x40000000",
+    "in_ram": true,
+    "ram_banks": 2,
+    "fixed_ranges": 26,
+    "reserve_entries": 0,
+    "dynamic_pools": 8,
+    "unbounded_pools": 0,
+    "conflicts": 0,
+    "map_errors": 0,
+    "accessed_candidate_ram": false
+  },
+  "probe03": {
+    "page_size_bytes": 16384,
+    "first_page": "0x100000000",
+    "last_page": "0x13FFFC000",
+    "words_compared": 8192,
+    "pattern_errors": 0,
+    "restore_errors": 0,
+    "tested_entire_candidate": false
+  },
+  "probe04": {
+    "translations_verified": true,
+    "translated_two_page_test_passed": true,
+    "pattern_errors": 0,
+    "restore_errors": 0,
+    "mmu_disabled_again_reported": true,
+    "sctlr_restored_reported": true,
+    "no_partition_writes_reported": true
+  },
+  "user_confirmed_normal_android_restart_after_probes": [
+    1,
+    2,
+    3,
+    4
+  ]
+}
