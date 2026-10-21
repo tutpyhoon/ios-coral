@@ -113,7 +113,7 @@ def substitutions(root: Path) -> None:
     print("STOP: output is a source profile, not a hardware-cleared boot image")
 
 
-def verify_kernel_source(root: Path) -> None:
+def verify_kernel_source(root: Path, checkout: Path) -> None:
     expected = {
         "osfmk/arm64/start.s": [
             "Lsflame_map_fb_page:", "0x9c400000 + 3008 * 5760",
@@ -139,7 +139,7 @@ def verify_kernel_source(root: Path) -> None:
     # The underlying Flame verifier guards providers, mockfs and framebuffer
     # table placement. Import it from the modified pinned upstream checkout.
     import sys
-    sys.path.insert(0, str(root.parent / "flame"))
+    sys.path.insert(0, str(checkout / "flame"))
     from stage_kernel import verify
     verify(root)
     print("PASS: CORAL geometry/identity, early console and no UFS source")
@@ -157,7 +157,7 @@ def main() -> None:
             raise RuntimeError(f"Refusing unpinned upstream source: {sha}")
         substitutions(root)
     else:
-        verify_kernel_source(root / "dxb/xnu" if (root / "dxb/xnu").exists() else root)
+        verify_kernel_source(root / "dxb/xnu" if (root / "dxb/xnu").exists() else root, root)
 
 
 if __name__ == "__main__":
