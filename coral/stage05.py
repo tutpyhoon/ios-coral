@@ -149,12 +149,12 @@ def install_hook(checkout: Path) -> None:
     """Run the strict three-token postpatch only AFTER 0099 applies."""
     path = checkout / "dxb/build.sh"
     script = path.read_text()
-    anchor = '        done\\n        cd "${WORK_DIR}"\\n    fi'
+    anchor = '        done\n        cd "${WORK_DIR}"\n    fi'
     if script.count(anchor) != 1:
         raise RuntimeError("Cannot locate pinned build patch-loop tail")
-    injected = ('        done\\n'
-                '        python3 "${GITHUB_WORKSPACE}/coral/postpatch05.py" "${WORK_DIR}/xnu"\\n'
-                '        cd "${WORK_DIR}"\\n    fi')
+    injected = ('        done\n'
+                '        python3 "${GITHUB_WORKSPACE}/coral/postpatch05.py" "${WORK_DIR}/xnu"\n'
+                '        cd "${WORK_DIR}"\n    fi')
     path.write_text(script.replace(anchor, injected))
     print("PASS: XNU build will apply CORAL postpatch after validated 0099")
 
