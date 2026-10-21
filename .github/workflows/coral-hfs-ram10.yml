@@ -1,0 +1,191 @@
+name: CORAL Phase 10 HFS+ RAM root (UNTESTED)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-hfs-ram10]
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  filesystem:
+    name: Build and verify 16 MiB HFS+ RAM root (macOS)
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout fixed HFS source and select Xcode 15
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          XC=$(ls -d /Applications/Xcode_15*.app | sort -V | head -1)
+          test -n "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - name: Build signed static HFS file-read init
+        run: |
+          mkdir -p coral-hfs-inputs
+          xcrun clang -target arm64-apple-ios16.0 -DFLAME_HFS_TEST -c source/tools/sweet-init.S -o coral-hfs-inputs/flame-fs-init.o
+          python3 source/tools/mkinit.py coral-hfs-inputs/flame-fs-init.o coral-hfs-inputs/flame-fs-init
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+          data=Path("coral-hfs-inputs/flame-fs-init").read_bytes()
+          assert struct.unpack_from("<I",data)[0]==0xfeedfacf
+          assert struct.unpack_from("<I",data,4)[0]==0x100000c
+          assert struct.unpack_from("<I",data,12)[0]==2
+          assert b"/etc/flame-test" in data
+          assert b"FLAME HFS: file read verified" in data
+          assert b"SWEET init: still alive" in data
+          print("PASS: ad-hoc signed arm64 userspace filesystem probe")
+          PY
+      - name: Create isolated RAM-root HFS+ image, detached and read-only verified
+        run: |
+          python3 source/flame/mkroot.py coral-hfs-inputs/flame-fs-init coral-hfs-inputs/flame-root.hfs
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0,"source/flame")
+          from mkroot import inspect_hfs, CHECK_CONTENTS
+          p=Path("coral-hfs-inputs")
+          raw=(p/"flame-root.hfs").read_bytes()
+          init=(p/"flame-fs-init").read_bytes()
+          m=json.loads((p/"flame-root.json").read_text())
+          assert len(raw)==16*1024*1024
+          assert m["check_contents"]==CHECK_CONTENTS.decode()
+          assert m["root_sha256"]==hashlib.sha256(raw).hexdigest()
+          assert m["init_sha256"]==hashlib.sha256(init).hexdigest()
+          assert inspect_hfs(raw)["cleanly_unmounted"] is True
+          print("PASS: exact 16 MiB clean HFS+, source-built executable, test-file contract")
+          PY
+          (cd coral-hfs-inputs && shasum -a 256 flame-fs-init flame-root.hfs flame-root.json > HFS-SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase10-hfs-inputs
+          path: |
+            coral-hfs-inputs/flame-fs-init
+            coral-hfs-inputs/flame-root.hfs
+            coral-hfs-inputs/flame-root.json
+            coral-hfs-inputs/HFS-SHA256SUMS
+          retention-days: 14
+          if-no-files-found: error
+
+  package:
+    name: Assemble and validate XNU plus HFS+ RAM root
+    needs: filesystem
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+      EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the Phase 09-proven XNU kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fetch this run's native HFS+ filesystem and init
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase10-hfs-inputs
+          path: coral-hfs-inputs
+      - name: Prepare separately named CORAL HFS+ boot mode
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/hfs_ram10.py source
+      - name: Pin source-built inputs and check their exact digest records
+        run: |
+          python3 - <<'PY'
+          import hashlib,os
+          from pathlib import Path
+          k=Path("coral-kernel")
+          p=Path("coral-hfs-inputs")
+          assert hashlib.sha256((k/"kernel.development.sweet").read_bytes()).hexdigest()==os.environ["EXPECTED_KERNEL_SHA"]
+          assert (k/"xnu-commit.txt").read_text().strip()=="1b191cb58250d0705d8a51287127505aa4bc0789"
+          assert (k/"port-commit.txt").read_text().strip()=="65ec12ed2d6fde38aa5868f8637075954814cc14"
+          for line in (p/"HFS-SHA256SUMS").read_text().splitlines():
+              digest,name=line.split()
+              assert hashlib.sha256((p/name).read_bytes()).hexdigest()==digest
+          assert (p/"flame-root.hfs").stat().st_size==16*1024*1024
+          print("PASS: pinned kernel and independently SHA-verified HFS inputs")
+          PY
+          cp coral-hfs-inputs/flame-fs-init coral-hfs-inputs/flame-root.hfs coral-hfs-inputs/flame-root.json coral-kernel/
+          (cd coral-kernel && sha256sum flame-fs-init flame-root.hfs flame-root.json >> SHA256SUMS)
+      - name: Install deterministic ARM64 build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Generate HFS-root payload and validate complete boot image
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          python3 flame/pack_kernel.py ../coral-kernel --hfs-root
+          bash flame/build.sh 10 "$PWD/flame/out/flame-early.payload"
+          python3 flame/check.py 10
+      - name: Confirm pure-RAM HFS root and preserved CORAL identity
+        run: |
+          python3 - <<'PY'
+          import json,hashlib,os
+          from pathlib import Path
+          m=json.loads(Path("source/flame/out/flame-early-manifest.json").read_text())
+          payload=Path("source/flame/out/flame-early.payload").read_bytes()
+          hfs=Path("coral-kernel/flame-root.hfs").read_bytes()
+          init=Path("coral-kernel/flame-fs-init").read_bytes()
+          assert m["kernel_sha256"]==os.environ["EXPECTED_KERNEL_SHA"]
+          assert m["payload_sha256"]==hashlib.sha256(payload).hexdigest()
+          assert m["ram_init_sha256"]==hashlib.sha256(init).hexdigest()
+          assert m["ram_root_sha256"]==hashlib.sha256(hfs).hexdigest()
+          assert m["hfs_root"] is True and m["kernel"]["ramdisk"] is not None
+          assert m["kernel"]["ramdisk"][1]=="0x1000000"
+          assert b"rd=md0" in payload and b"RAMDisk" in payload
+          assert b"google,coral" in payload and b"Google Pixel 4 XL" in payload
+          src=Path("source/flame/probe.c").read_text()
+          assert "16 MIB HFS+ ROOT IN RAM ONLY" in src
+          assert "payload_materialize(payload, &plan, FLAME_RAM_BASE);" in src
+          assert "PROBE_PREFLIGHT_ONLY" not in src
+          print("PASS: XNU + 16MiB HFS RAM volume, CORAL identity and bounds")
+          PY
+          aarch64-linux-gnu-readelf -r source/flame/out/probe.o | grep -q payload_materialize
+      - name: Package Phase 10 test artifact
+        run: |
+          mkdir -p coral-phase10
+          cp source/flame/out/flame-probe-10.img coral-phase10/coral-phase10-hfs-ram-UNTESTED.img
+          cp source/flame/out/flame-early-manifest.json coral-phase10/manifest.json
+          cp source/flame/coral-profile.json coral-phase10/profile.json
+          cat > coral-phase10/README.txt <<'EOF'
+          CORAL Phase 10 -- 16 MiB HFS+ filesystem in RAM, no UFS
+
+          Reuses kernel SHA 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+          Phase 09 demonstrated XNU and static userspace PID 1 on physical CORAL.
+          Expected test output includes:
+          "FLAME HFS: file read verified"
+          "SWEET init: still alive"
+          A file-read FAILED or root wait means this phase did not pass.
+          No iOS launchd, SpringBoard, or Apple userland is included.
+          No flash/format actions or UFS drivers are used. The root is RAM-only.
+          This XNU experimental image can hang or panic and will not
+          automatically reboot if PID1 stays alive. Device risk remains.
+          Candidate 1 GiB RAM range and framebuffer stride are NOT fully validated.
+          Only consider temporary boot on a backed-up, already-unlocked Pixel 4 XL.
+          Verify SHA256SUMS and device product. NEVER fastboot flash or wipe.
+          Record output and confirm Android recovery after forced reboot.
+          EOF
+          (cd coral-phase10 && sha256sum *.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase10-hfs-ram-UNTESTED
+          path: coral-phase10/
+          retention-days: 14
+          if-no-files-found: error
