@@ -1,0 +1,81 @@
+name: CORAL Phase 05 runtime preflight (NO XNU EXECUTION)
+on:
+  push:
+    branches: [coral-phase05-preflight]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download already-verified minimal XNU kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout pinned upstream and prepare CORAL profile
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/preflight05.py source
+      - name: Install cross-build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Assemble non-executing bootloader preflight
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          python3 flame/pack_kernel.py ../coral-kernel
+          bash flame/build.sh 07 "$PWD/flame/out/flame-early.payload"
+          python3 flame/check.py 07
+      - name: Assert candidate kernel copy and entry are unreachable
+        run: |
+          grep -q 'PROBE_PREFLIGHT_ONLY' source/flame/probe.c
+          grep -q 'DPROBE_PREFLIGHT_ONLY' source/flame/build.sh
+          if aarch64-linux-gnu-readelf -r source/flame/out/probe.o | grep -q payload_materialize; then
+            echo 'FAILED: candidate-RAM copy still linked in preflight probe'; exit 1
+          fi
+          echo 'PASS: preflight probe.o has no payload_materialize call'
+      - name: Package temporary preflight image (NOT XNU BOOT)
+        run: |
+          mkdir -p coral-preflight-out
+          cp source/flame/out/flame-probe-07.img coral-preflight-out/coral-phase05-preflight-07.img
+          cp source/flame/out/flame-early-manifest.json coral-preflight-out/manifest.json
+          cp source/flame/coral-profile.json coral-preflight-out/profile.json
+          cat > coral-preflight-out/README.txt <<'EOF'
+          CORAL PHASE 05 / PREFLIGHT 07 ONLY
+
+          Device: already unlocked Google Pixel 4 XL (coral).
+          This image checks the runtime FDT, RAM reservations, CPU, timer, GIC
+          geometry, and the embedded XNU payload structure. It displays output
+          and requests a normal reboot after 120 seconds.
+          It does NOT copy XNU into candidate RAM or jump to XNU.
+          It does NOT access UFS or write Android partitions.
+          A successful preflight is NOT authorization for an XNU boot.
+          The assumed framebuffer row stride has NOT been independently verified.
+          Do NOT flash any partition. Experimental temporary boots can still hang.
+          Confirm on-device product identity and make backups before any test.
+          Photograph all visible lines, including any failure message.
+          EOF
+          (cd coral-preflight-out && sha256sum *.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase05-runtime-preflight-07
+          path: coral-preflight-out/
+          retention-days: 14
+          if-no-files-found: error
