@@ -1,0 +1,87 @@
+name: CORAL cross-fork QEMU HFS RAM-root validation (HOST ONLY)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-fork-research-qemu]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  emulate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+      EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download physically tested CORAL XNU kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download independently verified Phase 10 RAM HFS filesystem
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase10-hfs-inputs
+          path: coral-hfs-inputs
+          run-id: 39546203266
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install emulator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm python3
+          qemu-system-aarch64 --version
+      - name: Prepare strict pinned CORAL QEMU profile
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/qemu_coral.py source
+          python3 -m py_compile source/flame/qemu.py source/tools/qemu-sweet.py
+          sha256sum -c coral-hfs-inputs/HFS-SHA256SUMS
+      - name: Verify frozen kernel hash and HFS metadata
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          kernel=Path('coral-kernel/kernel.development.sweet').read_bytes()
+          assert hashlib.sha256(kernel).hexdigest()==os.environ['EXPECTED_KERNEL_SHA']
+          root=Path('coral-hfs-inputs/flame-root.hfs').read_bytes()
+          m=json.loads(Path('coral-hfs-inputs/flame-root.json').read_text())
+          assert len(root)==16*1024*1024
+          assert m['root_sha256']==hashlib.sha256(root).hexdigest()
+          assert m['check_contents']=='FLAME HFS RAM ROOT OK\n'
+          print('PASS: proven CORAL kernel + Phase10 HFS root provenance')
+          PY
+      - name: Boot XNU + HFS RAM root in QEMU (no phone)
+        run: |
+          mkdir -p /tmp/coral-qemu
+          python3 source/flame/qemu.py coral-kernel/kernel.development.sweet /tmp/coral-qemu \
+            --hfs-root coral-hfs-inputs/flame-root.hfs --seconds 95
+      - name: Record machine-checkable simulator milestones
+        if: always()
+        run: |
+          if [ -f /tmp/coral-qemu/result.json ]; then
+            cp /tmp/coral-qemu/result.json ./coral-qemu-result.json
+            cat /tmp/coral-qemu/result.json
+          else
+            echo '{"result":"simulation_did_not_produce_result_json"}' > coral-qemu-result.json
+          fi
+      - name: Upload emulator screenshot and diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coral-hfs-phase10-qemu-evidence
+          path: |
+            coral-qemu-result.json
+            /tmp/coral-qemu/fb.png
+            /tmp/coral-qemu/fb.txt
+            /tmp/coral-qemu/registers.txt
+            /tmp/coral-qemu/qemu.log
+            /tmp/coral-qemu/result.json
+          retention-days: 14
+          if-no-files-found: warn
