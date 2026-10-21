@@ -70,6 +70,14 @@ def build() -> None:
     replace_unique(builder, "experimental/flame/flame", "experimental/coral/coral")
     replace_unique(builder, "666c616d652d70726f62652d3031", "636f72616c2d70726f62652d3031")
 
+    # The XL's 1440x3040 framebuffer is ~16.7 MiB, larger than flame's
+    # 16 MiB MMU guard. Expand the *upper bound* only after adapting the
+    # mapping tests to demand precisely the XL viewport.
+    mmu = WORK / "flame" / "mmu.c"
+    replace_unique(mmu, "fb_size > 0x1000000", "fb_size > 0x1200000")
+    mmu_tests = WORK / "flame" / "check_mmu.py"
+    replace_unique(mmu_tests, "1080 * 2280 * 4", "1440 * 3040 * 4", count=2)
+
     command(sys.executable, "flame/fetch.py", cwd=WORK)
     manifest = {
         "target": "Google Pixel 4 XL (coral)",
@@ -78,7 +86,7 @@ def build() -> None:
         "purpose": "temporary boot diagnostics; no storage writes",
         "images": [],
     }
-    for mode in ("01", "02"):
+    for mode in ("01", "02", "03", "04"):
         command("bash", "flame/build.sh", mode, cwd=WORK)
         command(sys.executable, "flame/check.py", mode, cwd=WORK)
         built = WORK / "flame" / "out" / f"flame-probe-{mode}.img"
@@ -88,7 +96,12 @@ def build() -> None:
             "file": dest.name,
             "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
             "bytes": dest.stat().st_size,
-            "mode": "CPU/FDT/splash" if mode == "01" else "read-only RAM map",
+            "mode": {
+                "01": "CPU/FDT/splash",
+                "02": "read-only RAM map",
+                "03": "two-page RAM test with restore; hardware-gated",
+                "04": "16K MMU translation and two-page RAM test; hardware-gated",
+            }[mode],
         })
         print(f"BUILT {dest}: {manifest['images'][-1]['sha256']}", flush=True)
 
