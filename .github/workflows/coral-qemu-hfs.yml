@@ -42,7 +42,7 @@ jobs:
           python3 coral/stage05.py prepare source
           python3 coral/qemu_coral.py source
           python3 -m py_compile source/flame/qemu.py source/tools/qemu-sweet.py
-          sha256sum -c coral-hfs-inputs/HFS-SHA256SUMS
+          (cd coral-hfs-inputs && sha256sum -c HFS-SHA256SUMS)
       - name: Verify frozen kernel hash and HFS metadata
         run: |
           python3 - <<'PY'
