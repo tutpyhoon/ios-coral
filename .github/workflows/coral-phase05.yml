@@ -1,0 +1,161 @@
+name: CORAL Phase 05 early XNU (UNTESTED)
+
+# Experimental: source-built, SWEET-derived *minimal* XNU for first CORAL
+# early-console handoff. This is not the Phase22 CORAL machine-config kernel,
+# nor a booted or functioning iOS image. Do not flash any partition.
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-phase05-prep]
+    paths:
+      - "coral/**"
+      - ".github/workflows/coral-phase05.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coral-phase05-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+  DXB_REV: 663906528d1cd5ea8fde7de6f16de73db9511549
+  XNU_REV: 1b191cb58250d0705d8a51287127505aa4bc0789
+
+jobs:
+  profile:
+    name: Validate evidence and pinned source transforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate measured hardware record
+        run: python3 coral/check_hardware.py
+      - name: Checkout precisely pinned reference source
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+      - name: Adapt Pixel 4 early console to CORAL (host-only)
+        run: |
+          python3 -m py_compile coral/stage05.py
+          python3 coral/stage05.py prepare source
+          grep -F '1440 * 3040 * 4' source/flame/patches/0099-flame-early-console.patch
+          grep -F 'Google Pixel 4 XL' source/flame/mkadt.py
+      - name: Install host probe build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Rebuild bounded CORAL boot diagnostic and verify ABI
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          bash flame/build.sh 02
+          python3 flame/check.py 02
+
+  kernel:
+    name: Build storage-free minimal kernel (macOS)
+    needs: profile
+    runs-on: macos-14
+    timeout-minutes: 120
+    env:
+      MACOS_VERSION: "13.5"
+      KERNEL_CONFIG: DEVELOPMENT
+      MACHINE_CONFIG: SWEET
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout and adapt pinned source
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+      - name: Checkout pinned build framework and XNU
+        run: |
+          git init -q source/dxb
+          git -C source/dxb fetch -q --depth 1 https://github.com/blacktop/darwin-xnu-build "$DXB_REV"
+          git -C source/dxb checkout -q --detach FETCH_HEAD
+          python3 source/flame/stage_kernel.py stage source/dxb
+          git init -q source/dxb/xnu
+          git -C source/dxb/xnu fetch -q --depth 1 https://github.com/apple-oss-distributions/xnu "$XNU_REV"
+          git -C source/dxb/xnu checkout -q --detach FETCH_HEAD
+      - name: Select Xcode 15 and install dependencies
+        run: |
+          brew install jq gum bash cmake ninja
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
+          sudo chmod +x /usr/local/bin/xcodes
+          XC=$(ls -d /Applications/Xcode_15*.app | sort -V | head -1)
+          test -n "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Build pinned bare-minimum XNU
+        working-directory: source/dxb
+        run: bash build.sh
+      - name: Verify compiled kernel and source-level device geometry
+        run: |
+          python3 source/flame/stage_kernel.py verify source/dxb/xnu
+          python3 coral/stage05.py verify-source source
+          python3 source/flame/check_kernel.py source/dxb/fakeroot/System/Library/Kernels/kernel.development.sweet
+          test ! -e source/dxb/xnu/bsd/dev/sweet_ufs.c
+      - name: Package kernel artifacts for guarded host-side image assembly
+        run: |
+          mkdir -p coral-kernel
+          cp source/dxb/fakeroot/System/Library/Kernels/kernel.development.sweet coral-kernel/
+          cp source/dxb/flame-patches.json coral-kernel/
+          git rev-parse HEAD > coral-kernel/port-commit.txt
+          git -C source/dxb/xnu rev-parse HEAD > coral-kernel/xnu-commit.txt
+          cd coral-kernel
+          shasum -a 256 kernel.development.sweet > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel/
+          retention-days: 14
+          if-no-files-found: error
+
+  package:
+    name: Host-verify temporary boot image (NOT CLEARED FOR DEVICE)
+    needs: kernel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download compiled minimal kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+      - name: Checkout exact same upstream source and apply CORAL profile
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+      - name: Install verified image packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Pack source-built XNU without iOS filesystem or UFS support
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          python3 flame/pack_kernel.py ../coral-kernel
+          bash flame/build.sh 05 flame/out/flame-early.payload
+          python3 flame/check.py 05
+          mkdir -p ../coral-phase05-out
+          cp flame/out/flame-probe-05.img ../coral-phase05-out/coral-phase05-xnu-UNTESTED.img
+          cp flame/out/flame-early-manifest.json ../coral-phase05-out/manifest.json
+          cp flame/coral-profile.json ../coral-phase05-out/profile.json
+          (cd ../coral-phase05-out && sha256sum *.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase05-xnu-boot-UNTESTED
+          path: coral-phase05-out/
+          retention-days: 14
+          if-no-files-found: error
