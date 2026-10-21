@@ -4,13 +4,15 @@
 
 ## Hardware evidence (device photographs, 2026-10-20)
 
-- Probe 01 displayed diagnostic output; details such as live CPU/PSCI/FDT values should be recorded separately before kernel handoff.
+- Probe 01 displayed output on the physical Pixel 4 XL. Observed: EL1; MIDR `0x51DF805E`; MPIDR `0x81000000`; TGRAN16 field `1` (16 KiB supported); timer frequency 19,200,000 Hz; PSCI `0x00010001` (v1.1); FDT at `0x84500000` with `0xACB47` bytes; splash reservation `[0x9c400000, 0x9e800000)` (36 MiB); RAM banks `[0x80000000, 0xbcc00000)` and `[0xc0000000, 0x200000000)`. Display text was visible on the Pixel 4 XL. The probe's contiguous pixel row layout works for diagnostics but does not independently establish physical display stride.
 - Probe 02 reported candidate RAM `[0x100000000, 0x140000000)` (1 GiB), `IN RAM=1`, `RAM BANKS=2`, `FIXED RANGES=0x1a`, `DYNAMIC POOLS=8`, `UNBOUNDED POOLS=0`, `CONFLICTS=0`, `MAP ERRORS=0`; it did **not** touch the candidate RAM.
 - Probe 03 read/modified/restored the first `0x4000` bytes at `0x100000000` and last `0x4000` bytes at `0x13fffc000`. Pattern and restoration errors were both zero. **The rest of the 1 GiB window was not tested.**
 - Probe 04 enabled a temporary 16 KiB MMU mapping, verified first/last translations, repeated the two-page test with zero errors, restored SCTLR, and disabled MMU.
 - User confirmed that Android restarted normally after Probe 02, 03 and 04. The four probe images were all booted temporarily with `fastboot boot`; no partition flash was requested.
 
 These tests support a limited boot-environment claim. They **do not** prove that the full RAM range is unowned, that firmware mappings remain safe after XNU reconfigures MMU/GIC, or that a Coral kernel is ready to boot.
+
+The measured values and host-side **consistency-only** checks are recorded in [hardware_observations.json](hardware_observations.json) and [check_hardware.py](check_hardware.py). The checker must **not** be interpreted as approval to boot a kernel; every critical value needs a live preflight check before copying a payload.
 
 ## Repository artifacts
 
