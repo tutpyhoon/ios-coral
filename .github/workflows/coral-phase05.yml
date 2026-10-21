@@ -147,7 +147,7 @@ jobs:
           cd source
           python3 flame/fetch.py
           python3 flame/pack_kernel.py ../coral-kernel
-          bash flame/build.sh 05 flame/out/flame-early.payload
+          bash flame/build.sh 05 "$PWD/flame/out/flame-early.payload"
           python3 flame/check.py 05
           mkdir -p ../coral-phase05-out
           cp flame/out/flame-probe-05.img ../coral-phase05-out/coral-phase05-xnu-UNTESTED.img
