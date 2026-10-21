@@ -1,0 +1,39 @@
+name: CORAL temporary boot probes
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-home-screen]
+    paths:
+      - "coral/**"
+      - ".github/workflows/coral-probes.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-probes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install AArch64 build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu             liblz4-1 ripgrep gcc
+      - name: Build and host-verify Pixel 4 XL probes
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: python3 coral/build_probes.py
+      - name: Upload bounded temporary-boot images
+        uses: actions/upload-artifact@v4
+        with:
+          name: coral-safe-probes
+          path: |
+            coral/out/coral-probe-01.img
+            coral/out/coral-probe-02.img
+            coral/out/manifest.json
+          if-no-files-found: error
+          retention-days: 14
