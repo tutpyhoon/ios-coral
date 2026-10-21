@@ -17,7 +17,7 @@ It deliberately preserves all live-FDT splash reservation, memory bounds and
 bootloader checks. The boards share the public SM8150 boot-source family,
 but this is **not** proof the Pixel 4 XL bootloader or live DT accepts the image.
 
-GitHub Actions builds **two images**:
+GitHub Actions builds **four images**:
 
 - `coral-probe-01.img`: read CPU/boot DT information, show it on the
   bootloader's reserved framebuffer if possible, then request a normal reset.
@@ -25,7 +25,15 @@ GitHub Actions builds **two images**:
   allocation using DT metadata only. No RAM candidate is touched or reserved
   by this diagnostic.
 
-Both are diagnostics. They do **not** contain XNU, iOS, SpringBoard, a storage
+- `coral-probe-03.img`: conditionally test *two* 16 KiB RAM pages by
+  writing patterns then restoring their contents. This can hang/reset on a
+  device with conflicting firmware reservations. **Do not boot it until
+  Probe 02 is reviewed and passes on CORAL.**
+- `coral-probe-04.img`: conditionally enable a minimal 16 KiB page MMU map
+  for the verified viewport and two RAM pages, check translations and then
+  undo the map; same caution as Probe 03.
+
+All are diagnostics. They do **not** contain XNU, iOS, SpringBoard, a storage
 driver or an iOS root image. They issue no UFS media operations or persistent
 partition writes. Pixel 4 XL's command-mode screen may remain black until a
 display refresh is implemented. A `fastboot boot` success line only confirms
@@ -77,8 +85,9 @@ fastboot boot coral-probe-02.img
 
 Photograph the RAM-map summary. In particular, `IN RAM`, `CONFLICTS`,
 `MAP ERRORS` and `UNBOUNDED POOLS` determine if the candidate can even be
-tested. Do **not** try to run the existing CORAL kernel merely because the
-two host tests passed.
+tested. **Wait for a review of this photo before trying Probe 03 or 04.**
+Host CI passing does not establish RAM-test safety on hardware. Do **not**
+try to run the existing CORAL kernel merely because host tests passed.
 
 ## Actual path to the home screen
 
