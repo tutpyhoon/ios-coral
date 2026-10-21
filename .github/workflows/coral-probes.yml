@@ -34,6 +34,8 @@ jobs:
           path: |
             coral/out/coral-probe-01.img
             coral/out/coral-probe-02.img
+            coral/out/coral-probe-03.img
+            coral/out/coral-probe-04.img
             coral/out/manifest.json
           if-no-files-found: error
           retention-days: 14
