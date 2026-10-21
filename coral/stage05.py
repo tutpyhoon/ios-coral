@@ -36,13 +36,13 @@ def substitutions(root: Path) -> None:
     # Adapt the actual XNU bootstrap and late framebuffer mappings, not only
     # the standalone console diagnostic. One 32 MiB L2 region is sufficient
     # for the observed 16.7 MiB contiguous viewport.
+    # Modify only NEW lines in Flame's 0099 patch. Context lines must stay
+    # byte-for-byte identical until after the patch has applied to XNU.
+    # The three retained context values are corrected by postpatch05.py.
     changes = [
         ("0x9c400000 + 2248 * 4320", "0x9c400000 + 3008 * 5760", 1),
-        (" \tmov\t\tx4, #4320", "-\tmov\t\tx4, #4320\n+\tmov\t\tx4, #5760", 1),
         ("1080 * 2280 * 4", "1440 * 3040 * 4", 2),
-        (" #define EARLY_WIDTH 1080u", "-#define EARLY_WIDTH 1080u\n+#define EARLY_WIDTH 1440u", 1),
         ("#define EARLY_HEIGHT 2280u", "#define EARLY_HEIGHT 3040u", 1),
-        (" #define EARLY_STRIDE (4320u / 4)", "-#define EARLY_STRIDE (4320u / 4)\n+#define EARLY_STRIDE (5760u / 4)", 1),
         ("'google,flame'", "'google,coral'", 1),
         ('strlcpy(name, "flame",', 'strlcpy(name, "coral",', 1),
         ('strlcpy(name, "Google Pixel 4",', 'strlcpy(name, "Google Pixel 4 XL",', 1),
@@ -145,9 +145,23 @@ def verify_kernel_source(root: Path, checkout: Path) -> None:
     print("PASS: CORAL geometry/identity, early console and no UFS source")
 
 
+def install_hook(checkout: Path) -> None:
+    """Run the strict three-token postpatch only AFTER 0099 applies."""
+    path = checkout / "dxb/build.sh"
+    script = path.read_text()
+    anchor = '        done\\n        cd "${WORK_DIR}"\\n    fi'
+    if script.count(anchor) != 1:
+        raise RuntimeError("Cannot locate pinned build patch-loop tail")
+    injected = ('        done\\n'
+                '        python3 "${GITHUB_WORKSPACE}/coral/postpatch05.py" "${WORK_DIR}/xnu"\\n'
+                '        cd "${WORK_DIR}"\\n    fi')
+    path.write_text(script.replace(anchor, injected))
+    print("PASS: XNU build will apply CORAL postpatch after validated 0099")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("command", choices=("prepare", "verify-source"))
+    p.add_argument("command", choices=("prepare", "verify-source", "hook"))
     p.add_argument("upstream_checkout", type=Path)
     args = p.parse_args()
     root = args.upstream_checkout.resolve()
@@ -156,6 +170,8 @@ def main() -> None:
         if sha != FLAME_COMMIT:
             raise RuntimeError(f"Refusing unpinned upstream source: {sha}")
         substitutions(root)
+    elif args.command == "hook":
+        install_hook(root)
     else:
         verify_kernel_source(root / "dxb/xnu" if (root / "dxb/xnu").exists() else root, root)
 
