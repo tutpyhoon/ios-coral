@@ -1,0 +1,168 @@
+name: CORAL Phase 09 RAM-only PID 1 (UNTESTED)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-ram-init09]
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  init:
+    name: Build standalone signed arm64 userspace probe (macOS)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 15
+        run: |
+          XC=$(ls -d /Applications/Xcode_15*.app | sort -V | head -1)
+          test -n "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - name: Build and verify static RAM init
+        run: |
+          mkdir -p coral-ram-init
+          xcrun clang -target arm64-apple-ios16.0 -c tools/sweet-init.S -o coral-ram-init/flame-init.o
+          python3 tools/mkinit.py coral-ram-init/flame-init.o coral-ram-init/flame-init
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct, hashlib
+          p=Path("coral-ram-init/flame-init")
+          v=p.read_bytes()
+          assert 16384 < len(v) < 131072
+          assert struct.unpack_from("<I",v)[0]==0xfeedfacf
+          assert struct.unpack_from("<I",v,4)[0]==0x100000c
+          assert struct.unpack_from("<I",v,12)[0]==2
+          assert b"SWEET init: still alive" in v
+          assert b"*** SWEET userspace: init running as PID " in v
+          print("PASS: arm64 static executable; PID banner and heartbeat present")
+          print("SHA256:", hashlib.sha256(v).hexdigest())
+          PY
+          (cd coral-ram-init && shasum -a 256 flame-init > INIT-SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase09-static-init
+          path: coral-ram-init/flame-init
+          retention-days: 14
+          if-no-files-found: error
+
+  package:
+    name: Build no-UFS XNU and RAM-init temporary boot image
+    needs: init
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+      EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch validated CORAL Phase 05 source-built kernel
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fetch this run's RAM-only static init
+        uses: actions/download-artifact@v4
+        with:
+          name: coral-phase09-static-init
+          path: coral-init
+      - name: Prepare pinned CORAL 09 profile
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/ram_init09.py source
+          test ! -e source/dxb/xnu/bsd/dev/sweet_ufs.c
+      - name: Verify kernel and static-init integrity
+        run: |
+          cp coral-init/flame-init coral-kernel/flame-init
+          (cd coral-kernel && sha256sum flame-init >> SHA256SUMS)
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, os
+          k=Path("coral-kernel")
+          assert hashlib.sha256((k/"kernel.development.sweet").read_bytes()).hexdigest()==os.environ["EXPECTED_KERNEL_SHA"]
+          assert (k/"xnu-commit.txt").read_text().strip()=="1b191cb58250d0705d8a51287127505aa4bc0789"
+          assert (k/"port-commit.txt").read_text().strip()=="65ec12ed2d6fde38aa5868f8637075954814cc14"
+          assert b"SWEET init: still alive" in (k/"flame-init").read_bytes()
+          print("PASS: SHA-pinned source-built kernel plus standalone RAM init")
+          PY
+      - name: Install host cross-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Assemble source-built XNU and RAM-only init
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          python3 flame/pack_kernel.py ../coral-kernel --ram-init
+          bash flame/build.sh 09 "$PWD/flame/out/flame-early.payload"
+          python3 flame/check.py 09
+      - name: Reject storage payloads or missing RAM root
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          m=json.loads(Path("source/flame/out/flame-early-manifest.json").read_text())
+          raw=Path("source/flame/out/flame-early.payload").read_bytes()
+          init=Path("coral-kernel/flame-init").read_bytes()
+          assert m["kernel_sha256"]==os.environ["EXPECTED_KERNEL_SHA"]
+          assert m["payload_sha256"]==hashlib.sha256(raw).hexdigest()
+          assert m["ram_init_sha256"]==hashlib.sha256(init).hexdigest()
+          assert m["ram_root_sha256"]==m["ram_init_sha256"]
+          assert m["hfs_root"] is False
+          assert m["kernel"]["ramdisk"] is not None
+          assert b"rd=md0" in raw
+          assert b"RAMDisk" in raw
+          assert b"google,coral" in raw
+          assert b"Google Pixel 4 XL" in raw
+          src=Path("source/flame/probe.c").read_text()
+          assert "RAM ROOT: STATIC INIT, NO UFS" in src
+          assert "payload_materialize(payload, &plan, FLAME_RAM_BASE);" in src
+          assert "PROBE_PREFLIGHT_ONLY" not in src
+          print("PASS: kernel plus static init, rd=md0, RAMDisk ADT, CORAL identity; no HFS root")
+          PY
+          aarch64-linux-gnu-readelf -r source/flame/out/probe.o | grep -q payload_materialize
+      - name: Package early RAM PID1 image and explicit warnings
+        run: |
+          mkdir -p coral-phase09
+          cp source/flame/out/flame-probe-09.img coral-phase09/coral-phase09-ram-init-UNTESTED.img
+          cp source/flame/out/flame-early-manifest.json coral-phase09/manifest.json
+          cp source/flame/coral-profile.json coral-phase09/profile.json
+          cat > coral-phase09/README.txt <<'EOF'
+          CORAL PHASE 09: XNU + RAM-ONLY STATIC PID 1 (EXPERIMENTAL)
+
+          On a physically verified unlocked Pixel 4 XL only.
+          The Pixel 4 XL CORAL XNU kernel was previously observed reaching
+          the BSD IOMedia / Apple_HFS root wait without an init image.
+          This variant adds a standalone static arm64 Mach-O to a RAM root.
+          Expected output after kernel boot:
+            *** SWEET userspace: init running as PID 1 ***
+            SWEET init: still alive
+          SWEET is inherited wording from the upstream RAM program.
+          It is NOT iOS launchd and does not contain SpringBoard.
+          No UFS driver or persistent root filesystem is packaged.
+          Nothing is intentionally written to internal partitions.
+          The full candidate RAM window is NOT comprehensively proven safe.
+          Device may hang or panic and recovery is not guaranteed.
+          No automatic reboot is expected from XNU PID 1.
+
+          Verify the sha256 manifest before any temporary test.
+          DO NOT use fastboot flash, unlock or wipe.
+          Back up Android and confirm product is coral first.
+          Capture output for examination before any forced restart.
+          This is not authorization for a persistent iOS install.
+          EOF
+          (cd coral-phase09 && sha256sum *.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase09-ram-pid1-UNTESTED
+          path: coral-phase09/
+          retention-days: 14
+          if-no-files-found: error
