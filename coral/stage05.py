@@ -38,11 +38,11 @@ def substitutions(root: Path) -> None:
     # for the observed 16.7 MiB contiguous viewport.
     changes = [
         ("0x9c400000 + 2248 * 4320", "0x9c400000 + 3008 * 5760", 1),
-        (" \tmov\t\tx4, #4320", "-\tmov\t\tx4, #4320\\n+\tmov\t\tx4, #5760", 1),
+        (" \tmov\t\tx4, #4320", "-\tmov\t\tx4, #4320\n+\tmov\t\tx4, #5760", 1),
         ("1080 * 2280 * 4", "1440 * 3040 * 4", 2),
-        (" #define EARLY_WIDTH 1080u", "-#define EARLY_WIDTH 1080u\\n+#define EARLY_WIDTH 1440u", 1),
+        (" #define EARLY_WIDTH 1080u", "-#define EARLY_WIDTH 1080u\n+#define EARLY_WIDTH 1440u", 1),
         ("#define EARLY_HEIGHT 2280u", "#define EARLY_HEIGHT 3040u", 1),
-        (" #define EARLY_STRIDE (4320u / 4)", "-#define EARLY_STRIDE (4320u / 4)\\n+#define EARLY_STRIDE (5760u / 4)", 1),
+        (" #define EARLY_STRIDE (4320u / 4)", "-#define EARLY_STRIDE (4320u / 4)\n+#define EARLY_STRIDE (5760u / 4)", 1),
         ("'google,flame'", "'google,coral'", 1),
         ('strlcpy(name, "flame",', 'strlcpy(name, "coral",', 1),
         ('strlcpy(name, "Google Pixel 4",', 'strlcpy(name, "Google Pixel 4 XL",', 1),
