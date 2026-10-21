@@ -39,7 +39,7 @@ jobs:
           git -C source checkout -q --detach FETCH_HEAD
       - name: Adapt Pixel 4 early console to CORAL (host-only)
         run: |
-          python3 -m py_compile coral/stage05.py
+          python3 -m py_compile coral/stage05.py coral/postpatch05.py
           python3 coral/stage05.py prepare source
           grep -F '1440 * 3040 * 4' source/flame/patches/0099-flame-early-console.patch
           grep -F 'Google Pixel 4 XL' source/flame/mkadt.py
@@ -79,6 +79,7 @@ jobs:
           git -C source/dxb fetch -q --depth 1 https://github.com/blacktop/darwin-xnu-build "$DXB_REV"
           git -C source/dxb checkout -q --detach FETCH_HEAD
           python3 source/flame/stage_kernel.py stage source/dxb
+          python3 coral/stage05.py hook source
           git init -q source/dxb/xnu
           git -C source/dxb/xnu fetch -q --depth 1 https://github.com/apple-oss-distributions/xnu "$XNU_REV"
           git -C source/dxb/xnu checkout -q --detach FETCH_HEAD
