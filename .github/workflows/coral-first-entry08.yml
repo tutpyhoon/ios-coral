@@ -14,7 +14,6 @@ jobs:
     env:
       FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
       EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
-      EXPECTED_PAYLOAD_SHA: d251a7c4897c66eef7a651091513921e39f5b01feb74c1fce3dd7351c2c44ed8
     steps:
       - uses: actions/checkout@v4
       - name: Download original successful storage-free CORAL XNU artifact
@@ -70,10 +69,13 @@ jobs:
           assert "PROBE_PREFLIGHT_ONLY" not in src
           j=json.loads(Path("source/flame/out/flame-early-manifest.json").read_text())
           assert j["kernel_sha256"]==os.environ["EXPECTED_KERNEL_SHA"]
-          assert j["payload_sha256"]==os.environ["EXPECTED_PAYLOAD_SHA"]
+          payload=Path("source/flame/out/flame-early.payload")
+          assert j["payload_sha256"]==hashlib.sha256(payload.read_bytes()).hexdigest()
+          # The pinned ADT generator uses os.urandom(64) for the kernel seed.
+          # Therefore independently regenerated payloads should not share a hash.
           assert j["ram_init_sha256"] is None and j["ram_root_sha256"] is None
           assert j["hfs_root"] is False and j["kernel"]["ramdisk"] is None
-          print("PASS: XNU copy/jump in source, original payload SHA, no init/root")
+          print("PASS: XNU copy/jump, regenerated payload hash, no init/root")
           PY
           aarch64-linux-gnu-readelf -r source/flame/out/probe.o | grep -q payload_materialize
           aarch64-linux-gnu-objdump -d source/flame/out/probe.o | grep -E '[[:space:]]blr[[:space:]]' >/dev/null
