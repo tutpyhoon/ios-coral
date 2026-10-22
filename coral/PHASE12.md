@@ -279,3 +279,7 @@ establish a working UFS block driver, partition mapping, HFS+ root,
 dyld, Apple launchd or SpringBoard. Next critical gate after owner
 hardware evidence is bounded **read-only block DMA** with verified
 ownership and LUN, then an XNU read-only root driver.
+
+## Physical UFS register probe result
+
+On October 21 the owner provided a Pixel 4 XL photo showing successful read-only UFS controller discovery. Live FDT confirmed address 0x01D84000. CAP=0x1587031F, VERSION=0x0300, HCE=1, HCS=0x10F, 64-bit DMA capability=1, transfer slots=32, transfer-list running=1, doorbell=0, task doorbell=0. The display explicitly reported no register writes, no DMA, no storage commands, and no partition writes. This establishes controller register access, not successful media or filesystem reads; Android restart afterward has not yet been confirmed.
