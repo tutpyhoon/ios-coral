@@ -23,7 +23,7 @@ def create_file(root,relative,b):
 def macho(kind=2, dynamic=False):
     # LC_LOAD_DYLINKER is required by the strict audit for real launchd.
     command=(struct.pack("<3I",0xe,12+len(b"/usr/lib/dyld")+1,12) +
-             b"/usr/lib/dyld\\0") if dynamic else b""
+             b"/usr/lib/dyld\0") if dynamic else b""
     return struct.pack("<8I",0xfeedfacf,0x100000c,0,kind,
                        int(dynamic),len(command),0,0)+command
 
