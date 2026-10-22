@@ -38,12 +38,23 @@ def survey(root: Path, role: str):
              "symlinks":0, "hardlink_duplicates":0,
              "apparent_bytes_unique_inodes":0, "allocated_bytes_upper_bound":0,
              "permissions_not_preserved_yet": True,
+             "unreadable_directories": 0, "unreadable_samples": [],
              "cache": [], "selected_paths": {}}
     pending=[root]
     seen=set()
     while pending:
         directory=pending.pop()
-        with os.scandir(directory) as it:
+        try:
+            iterator=os.scandir(directory)
+        except OSError as exc:
+            stats["unreadable_directories"]+=1
+            if len(stats["unreadable_samples"]) < 10:
+                stats["unreadable_samples"].append({
+                    "directory":str(directory.relative_to(root)),
+                    "reason":type(exc).__name__,
+                })
+            continue
+        with iterator as it:
             for item in it:
                 stats["entries"]+=1
                 if stats["entries"]>LIMIT:
@@ -121,8 +132,14 @@ def main():
             "Mac-created sparse HFS+X candidate; size depends on copied "
             "file bytes, HFS metadata and required runtime free space; "
             "no image created yet.")
-        output["copy_ready"] = all(image.get("detach_success") is True
-                                   for image in output["images"])
+        output["copy_ready"] = (all(image.get("detach_success") is True
+                                   for image in output["images"]) and
+                                all(a["unreadable_directories"] == 0
+                                    for a in all_surveys))
+        if not output["copy_ready"]:
+            output["warning"] = (
+                "One or more source filesystems had inaccessible directories; "
+                "the byte estimates may be incomplete. Do not build the root yet.")
         output["root_merge_warning"]=(
             "Apparent bytes double-count cross-volume duplicate files. "
             "Some APFS compression/sparse files may use less physical "
