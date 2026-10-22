@@ -172,3 +172,38 @@ Linux `apfs-fuse` route remains the fallback. The owner will retain
 firmware files locally; do not upload to public GitHub or CI.
 
 No partition flash or wipe has been authorized/performed at this stage.
+
+## Confirmed extracted DMG integrity and macOS format recognition — 2026-10-21
+
+Owner ran `coral/probe_macos_images.py ~/Coral-iOS-16-images` and reported:
+
+- `os.dmg` size 4,730,814,044 bytes; **SHA256 OK**, `file`: lzfse/lzvn encoded, `hdiutil imageinfo`: `ULFO` supported.
+- `systemos.dmg` size 2,743,074,816 bytes; **SHA256 OK**, APFS, `hdiutil imageinfo`: `UDRW` supported.
+- `appos.dmg` size 10,485,760 bytes; **SHA256 OK**, APFS, `hdiutil imageinfo`: `UDRW` supported.
+- `images_usable_on_macos: true` indicates recognized container format, **not** actual mounted-file readability.
+
+New tool `coral/inspect_mounted_ipsw.py` (unit-tested, no real image
+in GitHub) temporarily invokes `hdiutil attach -readonly -nobrowse
+-noautoopen -plist` for each image; lists mount points and relevant
+system file paths; always tries `hdiutil detach /dev/diskN` for the
+disk reported by that invocation. It does not copy iOS binaries or
+write to macOS source images or the Pixel's partitions. If a container
+has no mount point or attach fails, report the error and investigate
+Linux `apfs-fuse` instead. Do not `sudo` the probe.
+
+```sh
+cd ~/ios-coral-phase12
+git pull --ff-only origin coral-phase12-springboard
+python3 coral/inspect_mounted_ipsw.py ~/Coral-iOS-16-images
+```
+
+Potential finding: OS `sbin/launchd`/BackBoard/SpringBoard, SystemOS
+`dyld_shared_cache_arm64` and `usr/lib/dyld`, AppOS `System/Applications`.
+Actual layout must be derived from output rather than assumed.
+Some absolute iOS symlink targets do not resolve under macOS `/Volumes`;
+the tool reports those links rather than following them into the host.
+Never publish proprietary contents to GitHub or public CI.
+
+The host-only script/test run is
+https://github.com/tutpyhoon/ios-coral/actions/runs/39716133372
+(**passed**). Real Mac mount result is **pending**.
