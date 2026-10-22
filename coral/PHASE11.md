@@ -1,6 +1,6 @@
 # Phase 11 — Userspace process and loader bring-up (planning only)
 
-Status: **NOT built, NOT run, NOT hardware-tested**.
+Status: **BUILT and QEMU-PASSED on 2026-10-21; NOT hardware-tested**.
 Branch: `coral-phase11-userland-prep`.
 Base: physically tested (owner-reported) Phase 10 Coral HFS+ RAM-root milestone.
 
@@ -25,7 +25,7 @@ kernel exec on boot but not independent on-disk process launch or
 normal child process supervision. These are useful, smaller steps
 before diagnosing Apple's dynamic loader.
 
-Proposed hardware pass markers (not yet implemented):
+Implemented Phase 11 hardware pass markers (NOT YET hardware-confirmed):
 
 - `CORAL11: root HFS mounted`
 - `CORAL11: child exec succeeded`
@@ -63,5 +63,6 @@ The current `coral-hfs-ram10` image must remain untouched.
 
 ## Next implementation gate
 
-Build and QEMU-test the secondary process launcher in an isolated
-branch, and gate any physical test on machine-checked QEMU output.
+**Completed:** all 3 GitHub Actions jobs passed in [run 39712670256](https://github.com/tutpyhoon/ios-coral/actions/runs/39712670256). macOS built separately ad-hoc signed ARM64 Mach-O programs; mounted/cleanly detached a 16 MiB HFS+ volume named CoralRAM; QEMU executed the second /bin/coral-child binary from that filesystem, reported exit status 0 to PID 1, and PID 1 continued printing heartbeats. A separate temporary-boot artifact `coral-phase11-child-exec-UNTESTED` was packaged. Phase 10 remains unchanged.
+
+**Pending:** an actual Pixel 4 XL Phase 11 test; source-built probe only, not Apple launchd/SpringBoard. On-device XNU could still panic/hang; no automatic return to Android is guaranteed. The expected physical sequence is `hfs: mounted CoralRAM`, `CORAL11: PID1 HFS+ root active`, `CORAL11: fork succeeded, waiting for child`, `CORAL11: child exec succeeded`, `CORAL11: child exited status 0`, and `CORAL11: PID1 still alive`. The child success line comes from the secondary executable, not PID 1.
