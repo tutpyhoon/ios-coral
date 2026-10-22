@@ -98,8 +98,14 @@ static uint32_t c_command(uint8_t opcode, uint32_t lba, uint32_t bytes)
         c_ucd.cmd[19] = (uint8_t)(lba >> 16);
         c_ucd.cmd[20] = (uint8_t)(lba >> 8);
         c_ucd.cmd[21] = (uint8_t)lba;
-        c_ucd.cmd[24] = 0;
-        c_ucd.cmd[25] = 1;
+        /* READ(10) CDB byte 7..8 is the transfer length (big endian).
+         * The entire 10-byte CDB starts at cmd[16]; byte 9 is CONTROL.
+         * Previous prototype mistakenly wrote 1 into CONTROL at cmd[25],
+         * making the transfer length zero and yielding an empty data read.
+         */
+        c_ucd.cmd[23] = 0;   /* CDB[7]: transfer length MSB */
+        c_ucd.cmd[24] = 1;   /* CDB[8]: transfer length LSB = 1 block */
+        c_ucd.cmd[25] = 0;   /* CDB[9]: control */
     }
 
     uintptr_t cmd_phys = (uintptr_t)&c_ucd;
@@ -183,6 +189,9 @@ static void coral_ufs_media_test(void)
     rc = c_command(0x28,1,UFS_BLOCK);
     hex("CORAL12 READ GPT rc",rc);
     if (rc) { line("CORAL12: STOP AFTER GPT READ"); return; }
+    /* Show exact raw bytes in display for independent on-device evidence. */
+    hex("CORAL12 GPT WORD0", c_be32(c_data));
+    hex("CORAL12 GPT WORD1", c_be32(c_data+4));
     if (c_data[0]=='E' && c_data[1]=='F' && c_data[2]=='I' &&
         c_data[3]==' ' && c_data[4]=='P' && c_data[5]=='A' &&
         c_data[6]=='R' && c_data[7]=='T')
