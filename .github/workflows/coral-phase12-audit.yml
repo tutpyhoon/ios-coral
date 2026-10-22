@@ -1,0 +1,36 @@
+name: CORAL Phase 12 local iOS root audit tests
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-phase12-springboard]
+    paths:
+      - 'coral/ios_root_audit.py'
+      - 'coral/tests/test_ios_root_audit.py'
+      - '.github/workflows/coral-phase12-audit.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile static Mach-O audit tool and fixtures
+        run: |
+          python3 -m py_compile coral/ios_root_audit.py coral/tests/test_ios_root_audit.py
+          python3 -m unittest discover -s coral/tests -p 'test_ios_root_audit.py' -v
+      - name: Require no actual iOS files in tracked Phase 12 source inputs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast
+          import subprocess
+          for name in ("coral/ios_root_audit.py", "coral/tests/test_ios_root_audit.py"):
+              content=Path(name).read_bytes()
+              assert len(content)<100000
+              assert b"https://" not in content
+              assert b"subprocess." not in content
+              ast.parse(content.decode())
+          tracked=subprocess.check_output(["git","ls-files","coral/"],text=True).splitlines()
+          assert not any(p.lower().endswith((".ipsw",".dmg",".im4p",".aap",".hfs",".app")) for p in tracked)
+          print("PASS: only source/synthetic fixtures; no iOS firmware artifacts committed")
+          PY
