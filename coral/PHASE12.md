@@ -83,3 +83,11 @@ The real pixels/home screen are the required end-of-phase evidence.
 **Next executable work:** the host-only root dependency audit. Do not
 prepare a physical Phase 12 image until the audit identifies the minimum
 viable dynamically linked file set.
+
+## Implementation record — 2026-10-21
+
+- **Phase 11 photographed PASS** committed to `coral-phase11-userland-prep` via commit `e10964b088b2090ee384885048ed3950a5cfcf66`. No Phase 11 image changed.
+- Phase 12 branch implemented `coral/ios_root_audit.py`: **read-only, local-only** Mach-O audit of launchd/dyld/BackBoard/SpringBoard and the dyld shared cache. It reports dynamic-linker commands and CPU architecture, explicitly does not establish iOS bootability, and has no mount/flash/download functionality.
+- Synthetic tests in `coral/tests/test_ios_root_audit.py`: **6 tests passed**, including arm64 Mach-O parsing, a complete synthetic dependency tree, virtual absolute symlink resolution, path-escape rejection, truncated Mach-O rejection and missing-file handling.
+- GitHub Actions run [39714171134](https://github.com/tutpyhoon/ios-coral/actions/runs/39714171134): **SUCCESS**. No Apple proprietary binaries uploaded or included.
+- **Pending**: local user-provided legitimate iOS 16 merged OS/Cryptex root or path; then dynamic-linker dependency and filesystem budget investigation. No actual iOS launchd/SpringBoard code run on Coral yet.
