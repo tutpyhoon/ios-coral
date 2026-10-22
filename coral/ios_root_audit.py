@@ -152,6 +152,9 @@ def audit(root: Path):
                 magic = f.read(16)
             item["dyld_cache_magic"] = magic.decode("ascii", "backslashreplace")
             item["valid_dyld_cache_header"] = magic.startswith(b"dyld_v1")
+            if not item["valid_dyld_cache_header"]:
+                result["warnings"].append("dyld shared cache: unexpected header")
+                result["all_critical_present"] = False
         else:
             try:
                 item.update(parse_macho_header(path))
@@ -162,6 +165,10 @@ def audit(root: Path):
                 result["all_critical_present"] = False
             if role != "dyld" and item.get("filetype") != MH_EXECUTE:
                 result["warnings"].append(f"{role}: expected MH_EXECUTE")
+                result["all_critical_present"] = False
+            if role == "launchd" and not item.get("dynamic_loader"):
+                result["warnings"].append("launchd: missing LC_LOAD_DYLINKER")
+                result["all_critical_present"] = False
         result["files"][role] = item
     # This lower bound is intentionally NOT the total install size; cryptex,
     # shared-cache subfiles, services, frameworks and app resources add more.
