@@ -99,3 +99,11 @@ The source adaptation is **now compiling real upstream full code**, not merely t
 - [ADT source preflight](https://github.com/tutpyhoon/ios-coral/actions/runs/39866922004): **SUCCESS** for known Coral 1440×3040 framebuffer and `google,coral` identity, but no physical boot.
 
 Do **not** run the upstream Flame `flame-run.sh`, `dd of=/dev/block/sda15`, TWRP or `flash-all.sh` on the Pixel 4 XL. The regular Flame shim and XNU include storage-write paths; our future Coral bring-up must explicitly gate those and use a local stock `coral` DTB, not `flame` stock/dtb. No userdata replacement is performed by the above GitHub jobs.
+
+## Verified build results — 2026-10-22
+
+- **Full upstream XNU 0124 + Coral framebuffer/GPU geometry: SUCCESS.** [GitHub Actions run 39869118799](https://github.com/tutpyhoon/ios-coral/actions/runs/39869118799). Both source-gating and Mac XNU compilation jobs passed. The output `kernel.development.sweet` is a **17,890,776-byte ARM64 Mach-O executable**, build `DEVELOPMENT_ARM64_SWEET`. Artifact: `coral-flame-full-xnu0124-UNTESTED`, includes `SHA256SUMS` and is valid only as a raw kernel engineering input, NOT `fastboot boot` format.
+- **Coral safe shim: SUCCESS.** [GitHub Actions run 39869658682](https://github.com/tutpyhoon/ios-coral/actions/runs/39869658682), artifact `coral-flame-shim-elf-HOST-ONLY`. It linked into an AArch64 ELF with `ufs_ok=0` and the normal Flame DPU-autorefresh call removed; no stock `coral` boot DTB was bundled.
+- ADT adaptation preflight passed in run `39866922004` but the **full boot chain has not been tested**. Both artifacts are downloaded from GitHub Actions, not auto-deployed onto the owner's phone.
+- No real Apple `launchd`, SpringBoard or Turnip renderer has executed on `coral` in these build jobs. The author's actual GPU success remains demonstrated on the smaller `flame`, not this 4 XL.
+- Next: combine the verified Coral shim, the raw kernel, a read-only RAM root and stock Coral DTB into an isolated **temporary boot** test; first validate XNU start, memory carveouts and panel while deliberately NOT enabling Flame UFS userdata writes or GPU register programming. Do not flash.
