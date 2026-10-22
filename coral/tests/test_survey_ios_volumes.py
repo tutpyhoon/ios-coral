@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 root=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location("survey_ios_volumes",root/"survey_ios_volumes.py")
@@ -46,7 +47,7 @@ class SurveyTests(unittest.TestCase):
             base=Path(d)
             (base/"a").write_bytes(b"a")
             (base/"b").write_bytes(b"b")
-            with unittest.mock.patch.object(app,"LIMIT",1):
+            with mock.patch.object(app,"LIMIT",1):
                 with self.assertRaises(ValueError):
                     app.survey(base,"os")
 
