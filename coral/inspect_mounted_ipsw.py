@@ -76,6 +76,22 @@ def inspect_at_mount(mount, role):
     checks = {}
     for sub in CHECK_PATHS[role]:
         path = root / sub
+        # iOS contains absolute symlinks. Never let a nested lookup
+        # escape into a local macOS path by following a parent link.
+        prefixes = list(Path(sub).parts)
+        symlink_prefix = None
+        for length in range(1, len(prefixes) + 1):
+            candidate = root.joinpath(*prefixes[:length])
+            if candidate.is_symlink():
+                symlink_prefix = candidate
+                break
+        if symlink_prefix is not None and symlink_prefix != path:
+            checks[sub] = {
+                "type": "symlink_in_parent",
+                "component": str(symlink_prefix.relative_to(root)),
+                "target": os.readlink(symlink_prefix),
+            }
+            continue
         if path.is_symlink():
             checks[sub] = {"type": "symlink", "target": os.readlink(path)}
         elif path.is_file():
