@@ -5,6 +5,8 @@ on:
     branches: [coral-phase12-springboard]
     paths:
       - 'coral/ios_root_audit.py'
+      - 'coral/audit_hfs_candidate12.py'
+      - 'coral/tests/test_audit_hfs_candidate12.py'
       - 'coral/build_ios_hfs_candidate.py'
       - 'coral/tests/test_build_ios_hfs_candidate.py'
       - 'coral/survey_ios_volumes.py'
@@ -26,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile static Mach-O audit tool and fixtures
         run: |
-          python3 -m py_compile coral/ios_root_audit.py coral/tests/test_ios_root_audit.py coral/ipsw_prepare.py coral/tests/test_ipsw_prepare.py coral/probe_macos_images.py coral/tests/test_probe_macos_images.py coral/inspect_mounted_ipsw.py coral/tests/test_inspect_mounted_ipsw.py coral/survey_ios_volumes.py coral/tests/test_survey_ios_volumes.py coral/build_ios_hfs_candidate.py coral/tests/test_build_ios_hfs_candidate.py
+          python3 -m py_compile coral/ios_root_audit.py coral/tests/test_ios_root_audit.py coral/ipsw_prepare.py coral/tests/test_ipsw_prepare.py coral/probe_macos_images.py coral/tests/test_probe_macos_images.py coral/inspect_mounted_ipsw.py coral/tests/test_inspect_mounted_ipsw.py coral/survey_ios_volumes.py coral/tests/test_survey_ios_volumes.py coral/build_ios_hfs_candidate.py coral/tests/test_build_ios_hfs_candidate.py coral/audit_hfs_candidate12.py coral/tests/test_audit_hfs_candidate12.py
           python3 -m unittest discover -s coral/tests -p 'test_*.py' -v
       - name: Require no actual iOS files in tracked Phase 12 source inputs
         run: |
@@ -39,13 +41,15 @@ jobs:
                      "coral/probe_macos_images.py", "coral/tests/test_probe_macos_images.py",
                      "coral/inspect_mounted_ipsw.py", "coral/tests/test_inspect_mounted_ipsw.py",
                      "coral/survey_ios_volumes.py", "coral/tests/test_survey_ios_volumes.py",
-                     "coral/build_ios_hfs_candidate.py", "coral/tests/test_build_ios_hfs_candidate.py"):
+                     "coral/build_ios_hfs_candidate.py", "coral/tests/test_build_ios_hfs_candidate.py",
+                     "coral/audit_hfs_candidate12.py", "coral/tests/test_audit_hfs_candidate12.py"):
               content=Path(name).read_bytes()
               assert len(content)<100000
               assert b"https://" not in content
               if name not in ("coral/probe_macos_images.py", "coral/inspect_mounted_ipsw.py",
                               "coral/build_ios_hfs_candidate.py",
                               "coral/tests/test_build_ios_hfs_candidate.py",
+                              "coral/audit_hfs_candidate12.py",
                               "coral/tests/test_inspect_mounted_ipsw.py"):
                 assert b"subprocess." not in content
               elif name == "coral/probe_macos_images.py":
