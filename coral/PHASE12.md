@@ -244,3 +244,38 @@ An optional, host-local sparse HFS+ root candidate builder is in
 macOS small-image smoke test and synthetic guard tests passed. No full
 iOS root has been created or run on Pixel 4 XL yet, and CORAL UFS
 read support is not established.
+
+
+## 2026-10-21 hardware-storage discovery: UFS controller snapshot image
+
+The user reported that the **offline** 24 GiB sparse HFS+ candidate
+builder completed on their Mac. This is not yet a bootable device image;
+the full image contents have not been independently audited.
+
+CORAL-specific UFS hardware evidence from the published Google
+SDM855 device tree and LineageOS coral BoardConfig identifies
+`/soc/ufshc@1d84000`, base `0x01d84000` / span `0x2500`.
+The pinned Pixel 4 FLAME source already implements mode 06:
+it checks the bootloader-provided *live FDT* and EL1/MMU-off
+preconditions before reading exactly 10 allowlisted UFS controller
+registers. It performs no MMIO register writes, no UFS SCSI commands,
+no DMA, and no partition reads.
+
+CORAL source `coral/ufs_reg12.py` builds a separate temporary probe:
+- GitHub Actions run: https://github.com/tutpyhoon/ios-coral/actions/runs/39720027768
+- CI: **passed**, all mock register and DT checks.
+- Artifact: `coral-ufs-reg-12-UNTESTED`
+- Physical Pixel 4 XL test: **NOT performed** yet.
+- The expected physical markers are `LIVE DT METADATA VERIFIED`,
+  `UFS BASE`, `CAP`, `VERSION`, `HCE`, `HCS`,
+  `REGISTER SNAPSHOT COMPLETE`, `NO REGISTER WRITES / NO DMA`,
+  and `NO STORAGE COMMANDS OR MEDIA ACCESS`.
+- The image waits ~120 seconds then requests a reset, but a device may
+  hang before that; preserve backups and recovery instructions.
+
+Only temporary `fastboot boot` with validated checksum/target product,
+no flashing or formatting. Successful register access does **not**
+establish a working UFS block driver, partition mapping, HFS+ root,
+dyld, Apple launchd or SpringBoard. Next critical gate after owner
+hardware evidence is bounded **read-only block DMA** with verified
+ownership and LUN, then an XNU read-only root driver.
