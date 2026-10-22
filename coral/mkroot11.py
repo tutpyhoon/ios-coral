@@ -33,7 +33,7 @@ def build(upstream: Path, parent: Path, child: Path, out: Path):
             raise ValueError(f"{tag}: not bounded 64-bit Mach-O")
         binaries[tag]=b
     with tempfile.TemporaryDirectory(prefix="coral-phase11-") as d:
-        work=Path(d)
+        work=Path(d).resolve()  # macOS /var is a symlink to /private/var
         image=work/"root.dmg"
         mount=work/"mnt"
         mount.mkdir()
