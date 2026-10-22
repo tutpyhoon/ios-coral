@@ -10,7 +10,8 @@
 .globl _start
 .p2align 2
 _start:
-    and x9, sp, #~15
+    mov x9, sp
+    and x9, x9, #~15
     mov sp, x9
     adr x0, console
     mov x1, #O_RDWR
