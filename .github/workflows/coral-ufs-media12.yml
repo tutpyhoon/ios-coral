@@ -33,6 +33,14 @@ jobs:
           header=Path("coral/ufs_media12.h").read_text()
           assert "opcode != 0x00 && opcode != 0x25 && opcode != 0x28" in header
           assert "lba != 1 || bytes != UFS_BLOCK" in header
+          # READ(10) CDB begins at cmd[16].
+          # Transfer length is bytes 7-8, control byte 9 must remain zero.
+          assert "c_ucd.cmd[23] = 0;" in header
+          assert "c_ucd.cmd[24] = 1;" in header
+          assert "c_ucd.cmd[25] = 0;" in header
+          assert "c_ucd.cmd[25] = 1;" not in header
+          assert 'hex("CORAL12 GPT WORD0", c_be32(c_data));' in header
+          assert 'hex("CORAL12 GPT WORD1", c_be32(c_data+4));' in header
           assert "if (!c_took_over) return 90" in header
           assert "c_read(UFS_REG_UTRLDBR) != 0" in header
           assert "c_read(UFS_REG_UTRLRSR) != 1u" in header
