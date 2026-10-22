@@ -1,0 +1,54 @@
+name: CORAL Phase 12 UFS controller register-only preflight
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-phase12-springboard]
+    paths:
+      - "coral/ufs_reg12.py"
+      - ".github/workflows/coral-ufs12-reg.yml"
+permissions:
+  contents: read
+jobs:
+  build-ufs-registers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install cross-build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Build pinned register-only Coral preflight and run host mock MMIO/FDT gates
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: python3 coral/ufs_reg12.py
+      - name: Verify no DMA/SCSl/userdata components in selected source mode
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          j=json.loads(Path("coral/out/ufs12.json").read_text())
+          assert j["mode"]=="06 read-only controller register snapshot"
+          assert j["source_sha"]=="b91463ab1ef083f81f6c3393593385aa996ceaf0"
+          assert j["ufs_mmio_base"]=="0x01d84000"
+          assert len(j["ufs_reg_reads"])==10
+          assert j["ufs_write_ops"]==0 and j["scsi_commands"]==0
+          assert j["dma"] is False and j["partitions_accessed"] is False
+          assert j["kernel_entry"] is False and j["full_ios_boot"] is False
+          image=Path("coral/out")/j["boot_img"]
+          assert image.is_file() and image.stat().st_size==64*1024*1024
+          print("PASS: no persistent storage commands, ten whitelisted reads, device-tree gate")
+          PY
+          (cd coral/out && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-ufs-reg-12-UNTESTED
+          path: |
+            coral/out/coral-ufs-reg-12-NO-MEDIA-IO.img
+            coral/out/SHA256SUMS
+            coral/out/ufs12.json
+            coral/out/README-ufs12.txt
+          retention-days: 14
+          if-no-files-found: error
