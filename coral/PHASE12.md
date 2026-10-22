@@ -306,3 +306,9 @@ prints `CORAL12 GPT WORD0` and `CORAL12 GPT WORD1`.
 Physical confirmation of the corrected build is **still pending**.
 The probe programs controller queue registers and DMA, and has no media
 write CDBs; a phone can still hang or reset. Do not flash partitions.
+
+## Owner-photographed UFS GPT read PASSED
+
+Pixel 4 XL hardware screen, Oct 21 2026: UFS queue takeover OK, SCSI TUR rc=0, READ CAPACITY(10) rc=0, LASTLBA=0x01DC37FF, physical device block size=0x1000 (4096), READ(10) GPT rc=0, first two data words 0x45464920 and 0x50415254 (ASCII 'EFI PART'), and 'CORAL12: GPT HEADER READ VERIFIED'. This confirms controller access, DMA transfer and actual storage block data on LUN0, with no reported SCSI media write. The 120-second Android restart was only a printed announcement, not verified from this photo.
+
+For the next stage, an optional upstream read-only UFS driver was staged for XNU compilation using pinned patch 0028 ONLY. No write-capable patches (0030+) or root-auth bypass (0029) are included. The original RAM HFS root remains the working baseline. Only compiling a kernel does not prove that XNU can mount physical UFS. A separate Mac-local root image inspection script `coral/audit_hfs_candidate12.py` audits the user's created sparseimage without flashing.
