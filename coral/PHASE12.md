@@ -283,3 +283,7 @@ ownership and LUN, then an XNU read-only root driver.
 ## Physical UFS register probe result
 
 On October 21 the owner provided a Pixel 4 XL photo showing successful read-only UFS controller discovery. Live FDT confirmed address 0x01D84000. CAP=0x1587031F, VERSION=0x0300, HCE=1, HCS=0x10F, 64-bit DMA capability=1, transfer slots=32, transfer-list running=1, doorbell=0, task doorbell=0. The display explicitly reported no register writes, no DMA, no storage commands, and no partition writes. This establishes controller register access, not successful media or filesystem reads; Android restart afterward has not yet been confirmed.
+
+## Experimental UFS block-read diagnostic built
+
+GitHub run 39721269506 passed and published `coral-ufs-media12-UNTESTED`. The image is experimental and has **not** yet been run on physical Coral. Its source gates commands to TEST UNIT READY (0x00), READ CAPACITY(10) (0x25), and READ(10) of only LBA1 (0x28), with a 4096-byte transfer limit. It programs controller transfer queue registers and uses device-to-memory DMA, unlike the already passed register snapshot. Thus it may hang or destabilize controller state despite issuing no storage-media write command. Host validation passed, but neither successful DMA nor real block reads have been independently demonstrated. No XNU root, launchd, SpringBoard or filesystem access is provided by this image. Do not flash any partition. GitHub run: https://github.com/tutpyhoon/ios-coral/actions/runs/39721269506
