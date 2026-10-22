@@ -1,0 +1,65 @@
+name: CORAL Phase12 UFS read-only media diagnostic (host build)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-phase12-springboard]
+    paths:
+      - "coral/ufs_media12.h"
+      - "coral/ufs_media12.py"
+      - ".github/workflows/coral-ufs-media12.yml"
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install cross-build tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Compile UFS bounded read-only media diagnostic, run pinned host validation
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: python3 coral/ufs_media12.py
+      - name: Restrict SCSI CDB to TUR, CAPACITY, READ10 and verify no device-write operations
+        run: |
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          header=Path("coral/ufs_media12.h").read_text()
+          assert "opcode != 0x00 && opcode != 0x25 && opcode != 0x28" in header
+          assert "lba != 1 || bytes != UFS_BLOCK" in header
+          assert "if (!c_took_over) return 90" in header
+          assert "c_read(UFS_REG_UTRLDBR) != 0" in header
+          assert "c_read(UFS_REG_UTRLRSR) != 1u" in header
+          assert "c_ucd.cmd[16] = opcode;" in header
+          assert "c_ucd.cmd[1] = bytes ? 0x40 : 0x00;" in header
+          assert "if (c_ticks() - start >= limit)" in header
+          assert "CORAL12: GPT HEADER READ VERIFIED" in header
+          assert "#define UFS_BLOCK 4096u" in header
+          j=json.loads(Path("coral/out/media12.json").read_text())
+          assert j["device_write_commands"] is False
+          assert j["controller_queue_writes"] is True
+          assert j["device_dma"] is True
+          assert j["max_data_transfer"]==4096
+          assert j["physical_hardware_tested"] is False
+          assert j["source_sha"] == "b91463ab1ef083f81f6c3393593385aa996ceaf0"
+          assert j["image_bytes"] == 64*1024*1024
+          assert not re.search(r'\bfastboot\s+flash\b', header)
+          print("PASS: commands only 0x00/0x25/0x28; queue writes are controller only; no device media write commands")
+          PY
+          (cd coral/out && sha256sum -c SHA256SUMS-media12)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-ufs-media12-UNTESTED
+          path: |
+            coral/out/coral-ufs-media12-READ-ONLY-UNTESTED.img
+            coral/out/SHA256SUMS-media12
+            coral/out/media12.json
+            coral/out/README-media12.txt
+          if-no-files-found: error
+          retention-days: 14
