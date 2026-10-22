@@ -1,0 +1,53 @@
+name: Coral adaptation preflight for completed iOS-flame GPU port
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/prepare_upstream_flame.py'
+      - '.github/workflows/coral-flame-port.yml'
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    name: Pin Flame 0124 and verify Coral ADT adaptation (host only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FLAME_REV: 745c4341af86089efb0df851fa8a27fb8face624
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact iOS-on-Pixel-4 source revision
+        run: |
+          git init -q upstream-flame
+          git -C upstream-flame remote add origin https://github.com/NWylynko/ios-flame.git
+          git -C upstream-flame fetch -q --depth 1 origin "$FLAME_REV"
+          git -C upstream-flame checkout -q --detach FETCH_HEAD
+          test "$(git -C upstream-flame rev-parse HEAD)" = "$FLAME_REV"
+      - name: Adapt Coral ADT and scan Flame display/GPU constants
+        run: |
+          python3 coral/prepare_upstream_flame.py upstream-flame
+          python3 coral/prepare_upstream_flame.py upstream-flame --verify
+          python3 - <<'PY'
+          import json,sys
+          from pathlib import Path
+          sys.path.insert(0, "upstream-flame/tools")
+          import mkadt
+          assert (mkadt.FB_W,mkadt.FB_H,mkadt.FB_STRIDE)==(1440,3040,5760)
+          assert (mkadt.FB, mkadt.FB_SIZE) == (0x9c400000,0x2400000)
+          assert mkadt.FB_SIZE >= mkadt.FB_H*mkadt.FB_STRIDE
+          r=json.loads(Path("upstream-flame/coral-flame-port-report.json").read_text())
+          assert r["explicitly_not_bootable"] and not r["checks"]["coral_gpu_present_mapping"]
+          assert r["upstream_xnu_patches"] >= 105
+          assert "coral" in Path("upstream-flame/tools/mkadt.py").read_text()
+          assert "github" not in r.get("status","").lower()
+          print("PASS: 4 XL ADT geometry and identity staged; Flame GPU and panel port correctly remain blocked")
+          PY
+      - name: Save source-adaptation report only (NO Apple firmware, no boot image)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coral-flame0124-port-preflight
+          path: upstream-flame/coral-flame-port-report.json
+          retention-days: 14
+          if-no-files-found: error
