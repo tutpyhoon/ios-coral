@@ -229,3 +229,18 @@ python3 coral/survey_ios_volumes.py ~/Coral-iOS-16-images
 ```
 
 After the cache and volume size survey, plan an **offline HFS+X case-sensitive journaled sparse disk image** using `hdiutil` `-fs JHFS+X` and source-preserving `ditto` with compression disabled for compatibility. This is tentative and requires host disk capacity and permissions checks, not yet implemented or tested. The next actual device blocker is an independently proven **CORAL-specific UFS read driver**: do not flash `userdata` until that milestone passes.
+
+
+## Owner survey and offline root candidate checkpoint
+
+The user's 2026-10-21 Mac filesystem survey reported 11,304,857,126
+apparent bytes across OS (7,937,213,671), SystemOS (3,359,797,050)
+and AppOS (7,846,405); all source image mounts detached. The SystemOS
+cryptex has 44 dyld shared-cache members totaling 3,330,359,296 bytes.
+There were no inaccessible directories.
+
+An optional, host-local sparse HFS+ root candidate builder is in
+`coral/build_ios_hfs_candidate.py`. Its default is plan-only. The
+macOS small-image smoke test and synthetic guard tests passed. No full
+iOS root has been created or run on Pixel 4 XL yet, and CORAL UFS
+read support is not established.
