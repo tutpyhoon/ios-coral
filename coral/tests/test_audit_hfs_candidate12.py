@@ -20,13 +20,17 @@ def create_file(root,relative,b):
     p.write_bytes(b)
     return p
 
-def macho(kind=2):
-    return struct.pack("<8I",0xfeedfacf,0x100000c,0,kind,0,0,0,0)
+def macho(kind=2, dynamic=False):
+    # LC_LOAD_DYLINKER is required by the strict audit for real launchd.
+    command=(struct.pack("<3I",0xe,12+len(b"/usr/lib/dyld")+1,12) +
+             b"/usr/lib/dyld\\0") if dynamic else b""
+    return struct.pack("<8I",0xfeedfacf,0x100000c,0,kind,
+                       int(dynamic),len(command),0,0)+command
 
 def fixture(root):
     for relative in ("sbin/launchd","usr/libexec/backboardd",
                      "System/Library/CoreServices/SpringBoard.app/SpringBoard"):
-        create_file(root,relative,macho())
+        create_file(root,relative,macho(dynamic=(relative=="sbin/launchd")) )
     create_file(root,"usr/lib/dyld",macho(7))
     source=root/"private/preboot/Cryptexes/OS/System/Library/Caches/com.apple.dyld"
     target=root/"System/Library/Caches/com.apple.dyld"
