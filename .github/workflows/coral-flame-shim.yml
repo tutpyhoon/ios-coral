@@ -1,0 +1,65 @@
+name: CORAL safe Flame boot shim compile (NO boot.img)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/port_flame_shim.py'
+      - '.github/workflows/coral-flame-shim.yml'
+permissions:
+  contents: read
+env:
+  FLAME_REV: 745c4341af86089efb0df851fa8a27fb8face624
+jobs:
+  shim:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross compiler and linker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm binutils
+      - name: Pin Flame shim source and apply Coral read-only overlay
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$FLAME_REV"
+          python3 coral/port_flame_shim.py source
+      - name: Compile and link CORAL shim ELF, not a phone boot image
+        run: |
+          set -eu
+          mkdir -p shim-obj
+          for source in start.S shim.c console.c log.c util.c mmu.c fdt.c loader.c ufs.c spmi.c sde.c showlog.c diag.c disptest.c gpuprobe.c gpufw.S smmuprobe.c ramlog.c; do
+            obj="shim-obj/$(echo "$source" | cut -d. -f1).o"
+            clang --target=aarch64-none-elf -O2 -ffreestanding -nostdlib \
+              -fno-builtin -fno-pic -fno-pie -mgeneral-regs-only -mstrict-align \
+              -fno-stack-protector -fno-asynchronous-unwind-tables -Wall -Wextra \
+              -I source/shim -c "source/shim/$source" -o "$obj"
+          done
+          ld.lld -static -nostdlib -T source/shim/shim.ld --build-id=none -N shim-obj/*.o -o shim-obj/coral-shim.elf
+          file shim-obj/coral-shim.elf
+          llvm-readelf -h shim-obj/coral-shim.elf | grep -E 'AArch64|ELF64'
+      - name: Verify no accidental UFS scratch logging or Flame refresh
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          m=Path("source/shim/shim.c").read_text()
+          h=Path("source/shim/console.h").read_text()
+          assert "ufs_ok = 0;" in m
+          assert "ufs_ok = !ufs_init();" not in m
+          assert "ramlog_rescue();" not in m
+          assert 'con_str("CORAL", "read-only shim probe")' in m
+          assert "#define FB_W\t\t1440" in h
+          assert "#define FB_H\t\t3040" in h
+          assert "CORAL: UFS scratch logging/rescue disabled" in m
+          assert 'sde_autorefresh(1);\n\tsde_sample("autorefresh"' not in m
+          print("PASS: no Flame UFS scratch log writes or unverified panel refresh in normal shim")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-flame-shim-elf-HOST-ONLY
+          path: shim-obj/coral-shim.elf
+          retention-days: 14
+          if-no-files-found: error
