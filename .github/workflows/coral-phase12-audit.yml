@@ -5,6 +5,8 @@ on:
     branches: [coral-phase12-springboard]
     paths:
       - 'coral/ios_root_audit.py'
+      - 'coral/survey_ios_volumes.py'
+      - 'coral/tests/test_survey_ios_volumes.py'
       - 'coral/inspect_mounted_ipsw.py'
       - 'coral/tests/test_inspect_mounted_ipsw.py'
       - 'coral/probe_macos_images.py'
@@ -22,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compile static Mach-O audit tool and fixtures
         run: |
-          python3 -m py_compile coral/ios_root_audit.py coral/tests/test_ios_root_audit.py coral/ipsw_prepare.py coral/tests/test_ipsw_prepare.py coral/probe_macos_images.py coral/tests/test_probe_macos_images.py coral/inspect_mounted_ipsw.py coral/tests/test_inspect_mounted_ipsw.py
+          python3 -m py_compile coral/ios_root_audit.py coral/tests/test_ios_root_audit.py coral/ipsw_prepare.py coral/tests/test_ipsw_prepare.py coral/probe_macos_images.py coral/tests/test_probe_macos_images.py coral/inspect_mounted_ipsw.py coral/tests/test_inspect_mounted_ipsw.py coral/survey_ios_volumes.py coral/tests/test_survey_ios_volumes.py
           python3 -m unittest discover -s coral/tests -p 'test_*.py' -v
       - name: Require no actual iOS files in tracked Phase 12 source inputs
         run: |
@@ -33,7 +35,8 @@ jobs:
           for name in ("coral/ios_root_audit.py", "coral/tests/test_ios_root_audit.py",
                      "coral/ipsw_prepare.py", "coral/tests/test_ipsw_prepare.py",
                      "coral/probe_macos_images.py", "coral/tests/test_probe_macos_images.py",
-                     "coral/inspect_mounted_ipsw.py", "coral/tests/test_inspect_mounted_ipsw.py"):
+                     "coral/inspect_mounted_ipsw.py", "coral/tests/test_inspect_mounted_ipsw.py",
+                     "coral/survey_ios_volumes.py", "coral/tests/test_survey_ios_volumes.py"):
               content=Path(name).read_bytes()
               assert len(content)<100000
               assert b"https://" not in content
