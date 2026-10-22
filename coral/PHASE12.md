@@ -287,3 +287,22 @@ On October 21 the owner provided a Pixel 4 XL photo showing successful read-only
 ## Experimental UFS block-read diagnostic built
 
 GitHub run 39721269506 passed and published `coral-ufs-media12-UNTESTED`. The image is experimental and has **not** yet been run on physical Coral. Its source gates commands to TEST UNIT READY (0x00), READ CAPACITY(10) (0x25), and READ(10) of only LBA1 (0x28), with a 4096-byte transfer limit. It programs controller transfer queue registers and uses device-to-memory DMA, unlike the already passed register snapshot. Thus it may hang or destabilize controller state despite issuing no storage-media write command. Host validation passed, but neither successful DMA nor real block reads have been independently demonstrated. No XNU root, launchd, SpringBoard or filesystem access is provided by this image. Do not flash any partition. GitHub run: https://github.com/tutpyhoon/ios-coral/actions/runs/39721269506
+
+
+## Physical UFS bounded media read — owner photo and READ(10) CDB correction
+
+Photo from the Pixel 4 XL shows `CORAL12: UFS QUEUE TAKEOVER OK`,
+`TUR rc=0`, `CAP rc=0`, `LASTLBA 0x01DC37FF`, and
+`BLOCK 0x1000` (4096 bytes); `READ GPT rc=0` but reported
+`GPT SIGNATURE NOT FOUND`. This is evidence of queue/command response
+and plausible DMA capacity bytes, **not verified data-block reading**.
+
+Source inspection found the READ(10) SCSI CDB transfer length
+incorrectly placed at byte 9 (CONTROL) instead of byte 8:
+in the UPIU command array, the CDB starts at `cmd[16]`.
+Corrected `cmd[23]=0, cmd[24]=1, cmd[25]=0` to request **one
+4096-byte read block at LBA1** with control 0. The new test also
+prints `CORAL12 GPT WORD0` and `CORAL12 GPT WORD1`.
+Physical confirmation of the corrected build is **still pending**.
+The probe programs controller queue registers and DMA, and has no media
+write CDBs; a phone can still hang or reset. Do not flash partitions.
