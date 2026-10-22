@@ -91,3 +91,51 @@ viable dynamically linked file set.
 - Synthetic tests in `coral/tests/test_ios_root_audit.py`: **6 tests passed**, including arm64 Mach-O parsing, a complete synthetic dependency tree, virtual absolute symlink resolution, path-escape rejection, truncated Mach-O rejection and missing-file handling.
 - GitHub Actions run [39714171134](https://github.com/tutpyhoon/ios-coral/actions/runs/39714171134): **SUCCESS**. No Apple proprietary binaries uploaded or included.
 - **Pending**: local user-provided legitimate iOS 16 merged OS/Cryptex root or path; then dynamic-linker dependency and filesystem budget investigation. No actual iOS launchd/SpringBoard code run on Coral yet.
+
+## Updated owner constraints and IPSW preparation — 2026-10-21
+
+The owner confirmed they already have a downloaded iPhone X IPSW on macOS
+and are not concerned about preserving the existing LineageOS installation.
+This **allows evaluating a dedicated iOS HFS+ root on userdata**, but does
+NOT establish an explicit authorization to flash, erase or overwrite the
+device immediately. No destructive command is part of this step.
+
+The iPhone X target is iOS **16.7.16 / 20H392 / D22AP (iPhone10,3)**.
+The published firmware file is
+`iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw`.
+`coral/ipsw_prepare.py` identifies OS, Cryptex1,SystemOS and
+Cryptex1,AppOS paths from BuildManifest and optionally extracts their
+images on the user's Mac. The tool needs only stdlib `zipfile`,
+`plistlib` and SHA-256, leaves the original IPSW unchanged, and rejects
+ambiguous/incorrect firmware. It does not construct an HFS+ root.
+
+Run on the **user's Mac**, not in GitHub Actions:
+
+```sh
+python3 coral/ipsw_prepare.py "/path/to/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"
+python3 coral/ipsw_prepare.py "/path/to/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw" --extract "$HOME/Coral-iOS-16-images"
+```
+
+The resulting `os.dmg`, `systemos.dmg`, `appos.dmg` (names may retain
+their original image file extensions) are personal Apple firmware
+components: **never commit or upload to public GitHub or public CI**.
+
+**Next engineering blocker**: an original, CORAL-specific (Qualcomm
+SM8150/Pixel 4 XL) UFS storage driver that can *read* a dedicated HFS+
+root. Upstream SWEET's UFS addresses, clocks, PHY, DT nodes and reset
+sequence cannot be adopted unchanged. Build a separate read-only probe
+on hardware before any write to userdata. Also verify that the Pixel's
+partition arrangement and boot chain permit a safe restore path.
+The upstream `tools/mkiosroot.sh` uses `apfs-fuse`/Linux and a
+journaled 16 GiB HFS+ image; macOS cannot simply run that shell
+script as-is. An appropriate Linux VM or supported extraction tool may
+be needed for full root construction.
+
+Until actual CORAL UFS read access and full iOS root validation succeed,
+**do not flash userdata**: doing so prematurely would destroy the
+Android data volume without giving XNU a bootable root. A later,
+separately approved userdata replacement must be accompanied by
+backups, a tested stock factory-image restore procedure, and explicit
+understanding of the possibility of data loss or an unbootable device.
+
+IPSW manifest preflight synthetic CI: https://github.com/tutpyhoon/ios-coral/actions/runs/39714759134 (passed).
