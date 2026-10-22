@@ -1,0 +1,238 @@
+name: CORAL Phase 11 independent process exec (QEMU first)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-phase11-userland-prep]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  root:
+    name: Build two signed static Mach-O binaries and 16 MiB HFS+ root
+    runs-on: macos-14
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin upstream tools and select Xcode 15
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git b91463ab1ef083f81f6c3393593385aa996ceaf0
+          git -C source checkout -q --detach FETCH_HEAD
+          XC=$(ls -d /Applications/Xcode_15*.app | sort -V | head -1)
+          test -n "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Compile source-built parent and child (no Apple userland)
+        run: |
+          mkdir -p coral11
+          xcrun clang -target arm64-apple-ios16.0 -c coral/phase11_pid1.S -o coral11/pid1.o
+          xcrun clang -target arm64-apple-ios16.0 -c coral/phase11_child.S -o coral11/child.o
+          python3 source/tools/mkinit.py coral11/pid1.o coral11/flame-fs-init
+          python3 source/tools/mkinit.py coral11/child.o coral11/coral-child
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+          for name, markers in {
+              "flame-fs-init": [b"CORAL11: PID1 HFS+ root active",b"/bin/coral-child",b"CORAL11: child exited status 0"],
+              "coral-child": [b"CORAL11: child exec succeeded"],
+          }.items():
+              b=(Path("coral11")/name).read_bytes()
+              assert 1024<len(b)<131072
+              assert struct.unpack_from("<I",b)[0]==0xfeedfacf
+              assert struct.unpack_from("<I",b,4)[0]==0x100000c
+              assert struct.unpack_from("<I",b,12)[0]==2
+              assert all(s in b for s in markers), name
+              print("PASS: source-built static ARM64", name, len(b))
+          PY
+      - name: Create clean HFS+ RAM filesystem with two executables
+        run: |
+          python3 coral/mkroot11.py source coral11/flame-fs-init coral11/coral-child coral11/flame-root.hfs
+          (cd coral11 && shasum -a 256 flame-fs-init coral-child flame-root.hfs flame-root.json > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase11-source-built-hfs-inputs
+          path: |
+            coral11/flame-fs-init
+            coral11/coral-child
+            coral11/flame-root.hfs
+            coral11/flame-root.json
+            coral11/SHA256SUMS
+          retention-days: 14
+          if-no-files-found: error
+
+  qemu:
+    name: Execute child from HFS RAM root in QEMU (no phone)
+    needs: root
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+      EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: coral-phase11-source-built-hfs-inputs
+          path: coral11
+      - name: Install isolated host-only QEMU tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 qemu-system-arm
+      - name: Verify root and source commit; adapt emulator milestones
+        run: |
+          (cd coral11 && sha256sum -c SHA256SUMS)
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/qemu11.py source
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os
+          k=Path("coral-kernel")
+          assert hashlib.sha256((k/"kernel.development.sweet").read_bytes()).hexdigest()==os.environ["EXPECTED_KERNEL_SHA"]
+          root=Path("coral11/flame-root.hfs").read_bytes()
+          m=json.loads(Path("coral11/flame-root.json").read_text())
+          assert len(root)==16*1024*1024
+          assert m["root_sha256"]==hashlib.sha256(root).hexdigest()
+          assert m["child_sha256"]==hashlib.sha256(Path("coral11/coral-child").read_bytes()).hexdigest()
+          assert m["init_sha256"]==hashlib.sha256(Path("coral11/flame-fs-init").read_bytes()).hexdigest()
+          assert m["child_path"]=="/bin/coral-child"
+          print("PASS: unchanged CORAL XNU SHA, HFS root, two signed binaries")
+          PY
+      - name: Run Phase 11 95-second XNU simulated boot
+        run: |
+          mkdir -p /tmp/coral11
+          python3 source/flame/qemu.py coral-kernel/kernel.development.sweet /tmp/coral11 --hfs-root coral11/flame-root.hfs --seconds 95
+      - name: Machine-check PID1 fork/child exec/exit status/HFS
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("/tmp/coral11/result.json")
+          if not p.exists():
+              print("No emulator result.json")
+              raise SystemExit(2)
+          r=json.loads(p.read_text())
+          for k in ("hfs_mounted","coral11_parent_active","coral11_fork_done","coral11_child_exec","coral11_child_exit0","coral11_parent_alive","framebuffer_handoff_verified"):
+              print(k, r.get(k))
+              assert r.get(k) is True, k
+          assert r.get("coral11_error") is False
+          assert r["status"]=="no_panic_observed"
+          print("PASS: HFS mounted; PID1 fork, second Mach-O exec, exit=0, PID1 remains running")
+          PY
+      - name: Save emulator logs and framebuffer image
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase11-qemu-evidence
+          path: |
+            /tmp/coral11/fb.png
+            /tmp/coral11/fb.txt
+            /tmp/coral11/registers.txt
+            /tmp/coral11/qemu.log
+            /tmp/coral11/result.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  package:
+    name: Package temporary Coral-only boot image IF emulator passed
+    needs: [root,qemu]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FLAME_REV: b91463ab1ef083f81f6c3393593385aa996ceaf0
+      EXPECTED_KERNEL_SHA: 2946d4dda4ae46a794f945e9e3d26a147359d295a371f22e02474206a33e83d4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: coral-phase05-minimal-xnu-UNTESTED
+          path: coral-kernel
+          run-id: 39537822254
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: coral-phase11-source-built-hfs-inputs
+          path: coral11
+      - name: Check HFS and package a different temporary-boot variant
+        run: |
+          (cd coral11 && sha256sum -c SHA256SUMS)
+          cp coral11/flame-fs-init coral11/flame-root.hfs coral11/flame-root.json coral-kernel/
+          (cd coral-kernel && sha256sum flame-fs-init flame-root.hfs flame-root.json >> SHA256SUMS)
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git "$FLAME_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare source
+          python3 coral/phase11_loader.py source
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu liblz4-1 ripgrep gcc
+      - name: Build HFS+ RAM root payload with zero internal storage
+        env:
+          CROSS_COMPILE: aarch64-linux-gnu-
+        run: |
+          cd source
+          python3 flame/fetch.py
+          python3 flame/pack_kernel.py ../coral-kernel --hfs-root
+          bash flame/build.sh 11 "$PWD/flame/out/flame-early.payload"
+          python3 flame/check.py 11
+      - name: Assert exact kernel, root checksum, no UFS and correct device
+        run: |
+          python3 - <<'PY'
+          import json,hashlib,os
+          from pathlib import Path
+          m=json.loads(Path("source/flame/out/flame-early-manifest.json").read_text())
+          root=Path("coral11/flame-root.hfs").read_bytes()
+          payload=Path("source/flame/out/flame-early.payload").read_bytes()
+          assert m["kernel_sha256"]==os.environ["EXPECTED_KERNEL_SHA"]
+          assert m["ram_root_sha256"]==hashlib.sha256(root).hexdigest()
+          assert m["payload_sha256"]==hashlib.sha256(payload).hexdigest()
+          assert m["hfs_root"] is True and m["kernel"]["ramdisk"][1]=="0x1000000"
+          assert b"rd=md0" in payload and b"RAMDisk" in payload
+          assert b"google,coral" in payload and b"Google Pixel 4 XL" in payload
+          src=Path("source/flame/probe.c").read_text()
+          assert "RAM HFS+ - FORK/EXEC/WAIT4" in src
+          assert "payload_materialize(payload, &plan, FLAME_RAM_BASE);" in src
+          print("PASS: Coral-only, original XNU, RAM-only HFS root and guarded loader")
+          PY
+      - name: Publish Phase 11 separate experimental image
+        run: |
+          mkdir -p coral-phase11
+          cp source/flame/out/flame-probe-11.img coral-phase11/coral-phase11-child-exec-UNTESTED.img
+          cp source/flame/out/flame-early-manifest.json coral-phase11/manifest.json
+          cp source/flame/coral-profile.json coral-phase11/profile.json
+          cat > coral-phase11/README.txt <<'EOF'
+          CORAL Phase 11: SECOND STATIC PROCESS EXECUTION (UNTESTED ON HARDWARE)
+
+          This image runs XNU with a RAM-only HFS+ root and uses a custom
+          source-built PID 1 to fork a child and exec a separate signed
+          static ARM64 Mach-O from /bin/coral-child.
+          The output 'CORAL11: child exec succeeded' must originate
+          from the child; PID1 then checks exit status == 0.
+          There is NO Apple launchd, dyld or SpringBoard included.
+          No UFS/root partition access, flashing or wiping is intended.
+
+          Experimental XNU can freeze/panic. Device auto reboot is NOT
+          implemented. RAM is only partly characterized; backup Android.
+          DO NOT FLASH OR ERASE ANY PARTITION.
+          Do NOT test until user verifies checksum, model coral, bootloader
+          unlocked, Android data backup and understands recovery.
+          Only temporary fastboot boot may be considered.
+          EOF
+          (cd coral-phase11 && sha256sum *.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-phase11-child-exec-UNTESTED
+          path: coral-phase11/
+          retention-days: 14
+          if-no-files-found: error
