@@ -1,0 +1,45 @@
+name: CORAL Phase12 macOS HFS+ sparse image smoke test
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-phase12-springboard]
+    paths:
+      - 'coral/build_ios_hfs_candidate.py'
+      - '.github/workflows/coral-macos-hfs-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  mac_hfs:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create tiny case-sensitive journaled HFS+ sparse image (synthetic)
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys, subprocess, tempfile
+          sys.path.insert(0,"coral")
+          from build_ios_hfs_candidate import mounted
+          with tempfile.TemporaryDirectory(prefix="coral-hfs-synthetic-") as td:
+              root=Path(td)
+              out=root/"test-root.sparseimage"
+              subprocess.run(["hdiutil","create","-type","SPARSE","-size","128m",
+                              "-fs","Case-sensitive Journaled HFS+",
+                              "-volname","CoralSynthetic",str(out)],check=True)
+              assert out.is_file()
+              with mounted(out,root/"rw",readonly=False) as mount:
+                  (mount/"SpringBoard-smoke").write_text("synthetic only")
+                  assert (mount/"SpringBoard-smoke").read_text()=="synthetic only"
+                  (mount/"CaseName").write_text("case-sensitive")
+                  (mount/"casename").write_text("different file")
+                  assert (mount/"CaseName").read_text()!="different file"
+              with mounted(out,root/"ro",readonly=True) as mount:
+                  assert (mount/"SpringBoard-smoke").read_text()=="synthetic only"
+                  assert (mount/"CaseName").read_text()=="case-sensitive"
+              print("PASS: HFS+ sparse image create, case-sensitive RW mount, detach, RO remount, detach")
+          PY
+      - name: Assert no Apple or device firmware accessed
+        run: |
+          git ls-files coral/ | grep -E '\.(ipsw|dmg|im4p|sparseimage)$' && exit 1 || true
+          echo "PASS: synthetic host-only smoke test"
