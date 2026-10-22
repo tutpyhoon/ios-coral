@@ -139,3 +139,36 @@ backups, a tested stock factory-image restore procedure, and explicit
 understanding of the possibility of data loss or an unbootable device.
 
 IPSW manifest preflight synthetic CI: https://github.com/tutpyhoon/ios-coral/actions/runs/39714759134 (passed).
+
+## Observed owner IPSW extraction — 2026-10-21
+
+The owner ran `coral/ipsw_prepare.py` successfully on their Mac:
+- iPhone X D22AP, iOS 16.7.16 (20H392), Erase restore identity.
+- `os.dmg`: 4,730,814,044 bytes (from `087-86698-044.dmg`).
+- `systemos.dmg`: 2,743,074,816 bytes (from `087-86593-047.dmg`).
+- `appos.dmg`: 10,485,760 bytes (from `087-86715-047.dmg`).
+- All three reported extracted into `~/Coral-iOS-16-images/` on Mac.
+- No independent post-extraction digest check or filesystem readability test has been recorded yet. This is NOT a bootable HFS+ merged root.
+
+Next safe local check:
+
+```sh
+cd ~/ios-coral-phase12
+git pull --ff-only origin coral-phase12-springboard
+python3 coral/probe_macos_images.py ~/Coral-iOS-16-images
+```
+
+The probe reads the earlier `local-image-report.json`, measures independent
+SHA-256 over each of the three DMGs (~7.48 GB total), checks the original
+manifest-recorded byte sizes and asks macOS `hdiutil imageinfo` whether
+each image's outer container is recognized. It never attaches/mounts
+devices or modifies files, and handles unsupported raw APFS/cryptex images
+by reporting that limitation.
+
+Treat macOS `hdiutil imageinfo` success as a *format recognition result
+only*: it is not evidence that compressed OS/cryptex contents have been
+mounted or that a full HFS root can be built natively. The upstream
+Linux `apfs-fuse` route remains the fallback. The owner will retain
+firmware files locally; do not upload to public GitHub or CI.
+
+No partition flash or wipe has been authorized/performed at this stage.
