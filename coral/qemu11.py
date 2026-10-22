@@ -24,6 +24,10 @@ def main(root):
         # Snapshot-only markers, separately counted to prevent false positives
         # from the old Phase 10 PID1/HFS+ success criteria.
         observed = ''.join(screen.splitlines())
+        # Phase 11 names the HFS volume CoralRAM rather than upstream FlameRAM.
+        # Require the actual kernel mount log, not a fabricated success marker.
+        result['hfs_mounted'] = (result['hfs_mounted'] or
+                                 'hfs: mounted CoralRAM on device' in observed)
         result['coral11_parent_active'] = 'CORAL11: PID1 HFS+ root active' in observed
         result['coral11_fork_done'] = 'CORAL11: fork succeeded, waiting for child' in observed
         result['coral11_child_exec'] = 'CORAL11: child exec succeeded' in observed
