@@ -45,6 +45,7 @@ jobs:
               assert b"https://" not in content
               if name not in ("coral/probe_macos_images.py", "coral/inspect_mounted_ipsw.py",
                               "coral/build_ios_hfs_candidate.py",
+                              "coral/tests/test_build_ios_hfs_candidate.py",
                               "coral/tests/test_inspect_mounted_ipsw.py"):
                 assert b"subprocess." not in content
               elif name == "coral/probe_macos_images.py":
