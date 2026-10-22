@@ -207,3 +207,25 @@ Never publish proprietary contents to GitHub or public CI.
 The host-only script/test run is
 https://github.com/tutpyhoon/ios-coral/actions/runs/39716133372
 (**passed**). Real Mac mount result is **pending**.
+
+## Owner local macOS mount inspection passed — 2026-10-21
+
+The owner ran `coral/inspect_mounted_ipsw.py` after SHA verification:
+
+- **OS** image `os.dmg` mounted at `/Volumes/SydneyUpdate20H392.D22D221OS`. Found real Apple `/sbin/launchd` (541,600 bytes), `/usr/lib/dyld` (922,912 bytes), `/usr/libexec/backboardd` (1,184,848 bytes), SpringBoard executable (112,960 bytes), and `System/Library/xpc/launchd.plist` (1,456,980 bytes).
+- OS `/System/Cryptexes/OS` is a symlink with target `../../private/preboot/Cryptexes/OS` and `private/preboot/Cryptexes/OS` did not exist in the source OS image, as expected before cryptex merge.
+- **SystemOS** image `systemos.dmg` mounted. `System/Library/Caches/com.apple.dyld/dyld_shared_cache_arm64` exists but is only **393,216 bytes**. Do NOT conclude the entire shared cache is present at that size: audit all companion `.01`, `.02`, symbols etc.
+- **AppOS** image `appos.dmg` mounted, with `System/Library` directory; common app locations were absent.
+- **Every image** reported `attached_readonly: true`, `mounted: true`, and `detach_success: true`. No phone partition changed.
+
+Added `coral/survey_ios_volumes.py` to walk those source images using metadata-only `os.scandir` while mounted read-only. It estimates uncompressed/allocated bytes, counts hardlinked files once per volume and explicitly inventories actual dyld cache subfiles. It **never copies files** and reuses the scoped attach/detach handling. Synthetic tests passed in [GitHub Actions run 39716837198](https://github.com/tutpyhoon/ios-coral/actions/runs/39716837198).
+
+Use locally:
+
+```sh
+cd ~/ios-coral-phase12
+git pull --ff-only origin coral-phase12-springboard
+python3 coral/survey_ios_volumes.py ~/Coral-iOS-16-images
+```
+
+After the cache and volume size survey, plan an **offline HFS+X case-sensitive journaled sparse disk image** using `hdiutil` `-fs JHFS+X` and source-preserving `ditto` with compression disabled for compatibility. This is tentative and requires host disk capacity and permissions checks, not yet implemented or tested. The next actual device blocker is an independently proven **CORAL-specific UFS read driver**: do not flash `userdata` until that milestone passes.
