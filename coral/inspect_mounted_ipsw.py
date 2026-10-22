@@ -103,7 +103,7 @@ def inspect_at_mount(mount, role):
     return {"mount_point": str(root), "top_level": top, "paths": checks}
 
 
-def inspect_one(path, role, *, runner=subprocess.run):
+def inspect_one(path, role, *, runner=subprocess.run, scanner=None):
     """Mount and detach only the device freshly returned by THIS attach."""
     output = {"role": role, "image": path.name, "attached_readonly": False,
               "mounted": False, "mounts": [], "error": None,
@@ -131,7 +131,10 @@ def inspect_one(path, role, *, runner=subprocess.run):
                                "May require different filesystem tooling.")
         for mount in mounts:
             try:
-                output["mounts"].append(inspect_at_mount(mount, role))
+                details = inspect_at_mount(mount, role)
+                if scanner is not None:
+                    details["survey"] = scanner(Path(mount), role)
+                output["mounts"].append(details)
             except (OSError, ValueError) as e:
                 output["mounts"].append({"mount_point": mount, "scan_error": str(e)})
         output["mounted"] = bool(mounts)
@@ -156,7 +159,7 @@ def inspect_one(path, role, *, runner=subprocess.run):
     return output
 
 
-def run(directory, *, runner=subprocess.run):
+def run(directory, *, runner=subprocess.run, scanner=None):
     if sys.platform != "darwin":
         raise RuntimeError("Use this command on macOS only")
     directory = Path(directory).expanduser().resolve(strict=True)
@@ -176,7 +179,7 @@ def run(directory, *, runner=subprocess.run):
         image = directory / filename
         if image.is_symlink() or not image.is_file():
             raise ValueError(f"Missing regular local image {filename}")
-        findings.append(inspect_one(image, role, runner=runner))
+        findings.append(inspect_one(image, role, runner=runner, scanner=scanner))
     return {"stage": "coral-phase12-readonly-mounted-image-inspection",
             "images": findings,
             "note": "No files or partitions changed. Mounts should be detached now. "
