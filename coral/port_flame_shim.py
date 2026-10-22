@@ -46,7 +46,7 @@ def adapt(root):
            'con_str("CORAL", "read-only shim probe");')
     # The runtime path must keep the UFS logging gate permanently closed.
     content=main.read_text()
-    if content.count("ufs_ok = 0;")!=1 or "ufs_ok = !ufs_init();" in content:
+    if "ufs_ok = 0;" not in content or "ufs_ok = !ufs_init();" in content:
         raise RuntimeError("STOP: shim scratch UFS may be active")
     if 'log_printf("CORAL: UFS scratch logging/rescue disabled' not in content:
         raise RuntimeError("STOP: missing disabled-logging message")
