@@ -87,3 +87,15 @@ No phone image is emitted. GitHub CI:
 **Recovery:** all new experiments must initially use checksum-verified
 `fastboot boot`. No copied Flame boot image, `fastboot flash`, partition
 erase, TWRP writes or `dd` to Coral userdata at this stage.
+
+## Executed full Flame build work — 2026-10-22
+
+The source adaptation is **now compiling real upstream full code**, not merely the old PID1 test:
+
+- `coral/port_flame_full_xnu.py`: after applying ALL upstream Flame XNU patches 0001–0124, guarded edits change the boot framebuffer to 1440×3040/5760, touch dimensions to 1440×3040, GPU output panel W/H to 1440×3040, GPU scanout pitch to 5760 bytes, and Adreno 640 framebuffer mapping from 10 MiB to **18 MiB** (rounding a 17,510,400-byte panel up to 2 MiB blocks). **This is a compilation overlay, not proof the Pixel 4 XL DPU/panel works.**
+- [Full Flame XNU 0124 compilation job](https://github.com/tutpyhoon/ios-coral/actions/runs/39869118799): exact upstream commit `745c4341af86089efb0df851fa8a27fb8face624` and pinned blacktop build revision `663906528d1cd5ea8fde7de6f16de73db9511549`. Source/input validation passed. Mac build is independent of the owner's phone.
+- `coral/port_flame_shim.py`: adapts the shim console to 1440×3040; critically **disables Flame's UFS scratch/rescue logging** (which otherwise writes fixed userdata LBAs) and the Flame-specific panel autorefresh call on the normal path. This deliberately disables those features for the initial Coral tests.
+- [Shim source compilation job](https://github.com/tutpyhoon/ios-coral/actions/runs/39869658682): **SUCCESS**. Artifact `coral-flame-shim-elf-HOST-ONLY` is a raw linked ARM64 ELF, **not** a flashable boot image; it lacks the owner's Coral boot DTB, correct Apple device-tree boot payload and safe hardware run validation.
+- [ADT source preflight](https://github.com/tutpyhoon/ios-coral/actions/runs/39866922004): **SUCCESS** for known Coral 1440×3040 framebuffer and `google,coral` identity, but no physical boot.
+
+Do **not** run the upstream Flame `flame-run.sh`, `dd of=/dev/block/sda15`, TWRP or `flash-all.sh` on the Pixel 4 XL. The regular Flame shim and XNU include storage-write paths; our future Coral bring-up must explicitly gate those and use a local stock `coral` DTB, not `flame` stock/dtb. No userdata replacement is performed by the above GitHub jobs.
