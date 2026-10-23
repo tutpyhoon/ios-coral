@@ -40,6 +40,36 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Verify native macOS UID272 logd and UID501 preferences setup
+        run: |
+          sudo -v
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, subprocess, tempfile, sys
+          sys.path.insert(0,"coral")
+          from finalize_ios_root import prepare_userspace_dirs
+          with tempfile.TemporaryDirectory(prefix="coral-userspace-") as d:
+              path=Path(d)
+              prepare_userspace_dirs(path)
+              for rel in ("private/var/db/diagnostics",
+                          "private/var/db/uuidtext",
+                          "private/var/db/diagnostics/timesync"):
+                  p=path/rel
+                  assert p.is_dir()
+                  assert (p.stat().st_uid,p.stat().st_gid)==(272,272),rel
+                  assert (p/".migrated").is_file()
+                  assert ((p/".migrated").stat().st_uid,
+                          (p/".migrated").stat().st_gid)==(272,272),rel
+              prefs=path/"private/var/mobile/Library/Preferences"
+              assert prefs.is_dir()
+              assert (prefs.stat().st_uid,prefs.stat().st_gid)==(501,501)
+              # Restore to the CI runner so TemporaryDirectory removes it;
+              # these fixtures contain no proprietary Apple files.
+              subprocess.run(["sudo","chown","-R",
+                              str(os.getuid())+":"+str(os.getgid()),
+                              str(path/"private")],check=True)
+          print("PASS: real macOS logd numeric owners, migration files and mobile preferences")
+          PY
       - name: Create synthetic HFS+ sparse source, convert UDRW, validate exact raw size
         run: |
           python3 - <<'PY'
