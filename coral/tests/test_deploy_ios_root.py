@@ -54,6 +54,16 @@ class DeployTests(unittest.TestCase):
             with self.assertRaisesRegex(app.DeployError,"does not match"):
                 app.device_info()
 
+    def test_refuse_rooted_android_not_in_recovery(self):
+        def remote(cmd):
+            if "getprop ro.bootmode" in cmd:return "normal"
+            if "getprop ro.boot.mode" in cmd:return "normal"
+            return stub_remote(cmd)
+        with mock.patch.object(app,"adb",return_value="List of devices attached\nFAKE123\tdevice"), \
+             mock.patch.object(app,"remote",side_effect=remote):
+            with self.assertRaisesRegex(app.DeployError,"NOT in recovery mode"):
+                app.device_info()
+
     def test_refuse_mounted_data(self):
         def remote(cmd):
             if "cat /proc/mounts" in cmd:return "/dev/block/dm-0 /data ext4 rw 0 0"
