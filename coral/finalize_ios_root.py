@@ -37,6 +37,7 @@ import tempfile
 
 from build_ios_hfs_candidate import mounted
 from audit_hfs_candidate12 import validate as audit_root
+from hfs_partition_extract import locate_gpt_hfs, remove_gpt_inplace, hfs_header_at
 
 GIB=1024**3
 KEYBAG=b'<plist version="1.0"><dict><key>KeyBagKeys</key><data>U1dFRVQ=</data></dict></plist>\n'
@@ -162,17 +163,19 @@ def execute(source,tweaks,output):
             if not (mnt/"System/Library/xpc/launchd.plist").is_file():
                 raise RootError("Missing real Apple launchd service cache")
             print("PASS: real iOS system binaries, 44-part cache and local tweaks")
-    raw=check_hfs_bytes(dmg)
-    # The HFS+ volume starts at offset 0. Removing the 512-byte UDIF trailer
-    # is safe only when the volume header predicts the exact retained length.
+    # hdiutil -fs JHFS+X creates a GUID-partitioned disk, even when the
+    # user requested a filesystem. Strip the EXACT Apple HFS+ GPT partition
+    # from this disposable UDRW copy; retaining GPT would make XNU UFS root
+    # read "EFI PART" instead of the HFS+ volume header.
+    gpt=locate_gpt_hfs(dmg)
+    raw=remove_gpt_inplace(dmg)
     dmg.rename(final)
-    if raw["udif_trailer_bytes"]:
-        with final.open("r+b") as f:
-            f.truncate(raw["raw_bytes"])
-    # Recheck after truncation; never leave unverified raw output.
-    verify=check_hfs_bytes(final)
-    if verify["udif_trailer_bytes"] or verify["raw_bytes"] != final.stat().st_size:
-        raise RootError("Final raw HFS size check failed")
+    with final.open("rb") as f:
+        volume=hfs_header_at(f,0,final.stat().st_size)
+    if final.stat().st_size!=gpt["volume_bytes"]:
+        raise RootError("Extracted HFS partition byte count is incorrect")
+    verify={"gpt_removed":True,"partition_bytes":gpt["volume_bytes"],
+            "filesystem":volume,"original_start_lba":gpt["start_lba"]}
     report={"status":"HOST-ONLY RAW HFS+ ROOT PREPARED; NOT INSTALLED",
             "hfs":verify, "path":str(final),
             "original_sparseimage_unchanged":True,
