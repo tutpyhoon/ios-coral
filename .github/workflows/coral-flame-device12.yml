@@ -100,6 +100,32 @@ jobs:
             (cd coral-full-candidate && sha256sum coral-full-flame-RAM-UNTESTED.img)
             exit 1
           }
+      - name: Also prepare the REAL iOS 16 UFS-root boot candidate (NOT physically tested)
+        run: |
+          python3 coral/build_flame_device12.py \
+            --source source \
+            --tools input-tools \
+            --kernel full-kernel/kernel.development.sweet \
+            --ramroot hfs/flame-root.hfs \
+            --reference-boot known-boot/coral-phase11-child-exec-UNTESTED.img \
+            --root-mode ufs \
+            --output coral-full-candidate/coral-full-flame-UFS-UNTESTED.img
+      - name: Verify UFS root is distinct, writable and dependent on phone installation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path("coral-full-candidate/coral-full-flame-UFS-UNTESTED-engineering/manifest.json")
+          j=json.loads(p.read_text())
+          assert j["root_mode"]=="ufs"
+          assert j["userdata_must_be_installed_first"]
+          assert j["ufs_media_write_commands_enabled"]
+          assert j["apple_launchd"] is False and j["tested_with_apple_launchd"] is False
+          assert j["dtb_sha256"]=="f582348d19807e8f4681e6c226c9947ef64a380ef1c85c487458f7bf085b89da"
+          assert j["never_flash_or_erase"] and j["only_fastboot_boot_supported"]
+          assert Path("coral-full-candidate/coral-full-flame-UFS-UNTESTED.img").stat().st_size==67108864
+          print("PASS: separate full iOS userdata root candidate built, untested, no phone touched")
+          PY
       - name: Package this experimental image only, not firmware or phone-partition tool
         run: |
           cp coral-full-candidate/coral-full-flame-RAM-UNTESTED-engineering/manifest.json coral-full-candidate/manifest.json
@@ -116,6 +142,28 @@ jobs:
           1GiB high-memory span inferred from prior Coral probe, not full carveout certified.
           EOF
           (cd coral-full-candidate && sha256sum coral-full-flame-RAM-UNTESTED.img > SHA256SUMS)
+      - name: Stage UFS-root boot variant and clearly mark physical risk
+        run: |
+          mkdir -p coral-ufs-boot
+          cp coral-full-candidate/coral-full-flame-UFS-UNTESTED.img coral-ufs-boot/
+          cp coral-full-candidate/coral-full-flame-UFS-UNTESTED-engineering/manifest.json coral-ufs-boot/manifest.json
+          cat > coral-ufs-boot/README.txt <<'EOF'
+          PIXEL 4 XL EXPERIMENTAL REAL iOS 16 USERDATA ROOT BOOT — NOT HARDWARE TESTED.
+          NOT a current iOS home-screen success. The device-specific UFS write code is ENABLED
+          with rd=ufsroot0 rootrw=1 ufsrw=1. Only mount after user explicitly prepares
+          their own verified raw HFS+ userdata partition and backs up IMEI calibration data.
+          Early framebuffer/GPU full iOS 16 path remains unverified on Coral.
+          There are NO Apple system files in this image; those live on the private HFS+ root.
+          NEVER fastboot flash any boot partitions; fastboot boot only for deliberate tests.
+          Can hang, reboot or cause persistent data loss by writing userdata. Use at your own risk.
+          EOF
+          (cd coral-ufs-boot && sha256sum coral-full-flame-UFS-UNTESTED.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-full-flame-UFS-UNTESTED
+          path: coral-ufs-boot/
+          retention-days: 14
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: coral-full-flame-RAM-UNTESTED
