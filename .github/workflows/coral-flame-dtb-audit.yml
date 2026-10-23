@@ -1,0 +1,61 @@
+name: CORAL prior working boot v2 DTB audit (host only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/audit_bootimg_v2.py'
+      - '.github/workflows/coral-flame-dtb-audit.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test parser with synthetic Android v2 header
+        run: |
+          python3 - <<'PY'
+          import sys,struct
+          sys.path.insert(0,"coral")
+          from audit_bootimg_v2 import inspect
+          b=bytearray(3*4096+128)
+          b[:8]=b"ANDROID!"
+          struct.pack_into("<10I",b,8,50,0x8000,50,0x1000000,0,0,0x100,4096,2,0)
+          struct.pack_into("<IQIIQ",b,1632,0,0,1660,128,0x1f00000)
+          b[12288:12292]=b"\xd0\x0d\xfe\xed"
+          struct.pack_into(">I",b,12292,128)
+          r,_=inspect(bytes(b))
+          assert r["sections"]["dtb"] == {"offset":12288,"size":128}
+          assert r["board_identity_verified"] is False
+          print("PASS: bounded read-only boot image v2 parser")
+          PY
+      - name: Inspect precisely the former Phase11 physical-pass boot artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p prior-phase11
+          gh run download 39712670256 -R tutpyhoon/ios-coral \
+            -n coral-phase11-child-exec-UNTESTED --dir prior-phase11
+          (cd prior-phase11 && sha256sum -c SHA256SUMS)
+          python3 coral/audit_bootimg_v2.py \
+            prior-phase11/coral-phase11-child-exec-UNTESTED.img > boot-v2-report.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          j=json.loads(Path("boot-v2-report.json").read_text())
+          assert j["dtb_magic"]=="d00dfeed"
+          assert j["header_version"]==2
+          assert j["sections"]["dtb"]["size"] > 40
+          assert j["board_identity_verified"] is False
+          print("PASS: former hardware-tested boot container has extractable FDT, separate board verification still REQUIRED")
+          print(j)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-flame-previous-boot-v2-preflight
+          path: boot-v2-report.json
+          retention-days: 14
+          if-no-files-found: error
