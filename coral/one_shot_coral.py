@@ -59,6 +59,16 @@ def checked_boot_img(folder):
     manifest=json.loads(manifest_path.read_text())
     if manifest.get("root_mode")!="ufs" or not manifest.get("userdata_must_be_installed_first"):
         raise RuntimeError("Downloaded artifact is not the intended full-iOS UFS root build")
+    # The current CORAL kernel deliberately blocks all SCSI WRITE commands.
+    # A read-only image is useful for development, but the one-shot installer
+    # must NEVER destroy Android userdata for a kernel that cannot maintain
+    # Apple's writable /private/var and launchd state.
+    if manifest.get("ufs_media_write_commands_enabled") is not True:
+        raise RuntimeError(
+            "STOP BEFORE USERDATA ERASE: XNU has hard-fenced UFS writes. "
+            "Full iOS installation requires a separately validated, "
+            "explicitly writable userdata-only kernel after on-device "
+            "read-only UFS GPT testing. Use the UFS-GPT-DIAG image first.")
     if manifest.get("full_flame_source_pin")!=UPSTREAM_SHA or manifest.get("model")!="Pixel 4 XL (coral)":
         raise RuntimeError("Downloaded artifact has an unexpected source or phone")
     expected=manifest.get("boot_sha256")
