@@ -15,7 +15,7 @@ import one_shot_coral as app
 class OneShotTests(unittest.TestCase):
     def test_refuses_destroy_without_exact_confirmation(self):
         with mock.patch.object(app,"ensure_mac") as x:
-            with self.assertRaisesRegex(RuntimeError,"confirmation"):
+            with self.assertRaisesRegex(RuntimeError,"--confirm"):
                 app.execute(Path("/fake"),Path("/fake"),39889361147,None,"")
             x.assert_not_called()
 
