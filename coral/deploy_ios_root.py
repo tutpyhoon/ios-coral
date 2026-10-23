@@ -83,6 +83,11 @@ def device_info():
         "ro.product.device","ro.product.vendor.device","ro.bootmode","ro.boot.mode")}
     if "coral" not in {props["ro.product.device"],props["ro.product.vendor.device"]}:
         raise DeployError("Device identity does not match Pixel 4 XL (coral)")
+    # A rooted Android user build can report 'coral' and uid 0. Never
+    # overwrite an actively running phone's userdata. An actual custom
+    # recovery must report recovery as the boot mode.
+    if not any(props[k] == "recovery" for k in ("ro.bootmode","ro.boot.mode")):
+        raise DeployError("Device is NOT in recovery mode; never write userdata from Android")
     uid=remote("id -u").strip()
     if uid!="0":
         raise DeployError("Recovery ADB shell must run as root; do not try from normal Android")
@@ -154,7 +159,8 @@ def back_up_provisioning(folder,phone):
             p=subprocess.run(command,stdout=fd,stderr=subprocess.PIPE,check=False)
         if p.returncode or out.stat().st_size!=partsize:
             raise DeployError(f"Backup of {name} failed; STOP BEFORE ANY WRITES")
-        digest=hashlib.file_digest(out.open("rb"),"sha256").hexdigest()
+        with out.open("rb") as backup_fd:
+            digest=hashlib.file_digest(backup_fd,"sha256").hexdigest()
         report[name]={"file":out.name,"bytes":partsize,"sha256":digest}
     (root/"manifest.json").write_text(json.dumps({
         "device":"coral","private_per_device_calibration":True,
@@ -206,8 +212,18 @@ def install(image,backup_dir,confirmation):
         raise DeployError("First HFS block READBACK MISMATCH: stop, do not boot iOS")
     if read_device_block(phone["by_name"],size//BLOCK-1)!=last:
         raise DeployError("Final HFS block READBACK MISMATCH: stop, do not boot iOS")
+    # A first/last block check can miss corrupted transfers in the middle.
+    # Check three additional deterministic blocks without reading private
+    # user data to the CI/server. These are still samples, not a full hash.
+    for block_index in (size//(BLOCK*4), size//(BLOCK*2),
+                        (size//BLOCK)*3//4):
+        with source.open("rb") as source_fd:
+            source_fd.seek(block_index*BLOCK)
+            expected=source_fd.read(BLOCK)
+        if read_device_block(phone["by_name"],block_index)!=expected:
+            raise DeployError(f"Middle block {block_index} READBACK MISMATCH; do not boot")
     print(json.dumps({
-        "status":"USERDATA REPLACED WITH RAW HFS+; FIRST/LAST BLOCKS MATCH",
+        "status":"USERDATA REPLACED WITH RAW HFS+; FIVE READBACK SAMPLES MATCH (NOT FULL VERIFICATION)",
         "device":"coral","wrote_bytes":size,
         "backup_dir":str(backup_dir),
         "next":"Only a validated CORAL-specific full-XNU UFS-root boot image can use this",
