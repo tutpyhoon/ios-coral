@@ -1,0 +1,134 @@
+name: CORAL FUTURE userdata-only writable XNU compilation (NOT BOOTABLE)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - "coral/port_flame_writable_root.py"
+      - ".github/workflows/coral-flame-full-xnu.yml"
+permissions:
+  contents: read
+env:
+  FLAME_FULL_REV: 745c4341af86089efb0df851fa8a27fb8face624
+  DXB_REV: 663906528d1cd5ea8fde7de6f16de73db9511549
+  MACOS_VERSION: "13.5"
+  KERNEL_CONFIG: DEVELOPMENT
+  MACHINE_CONFIG: SWEET
+jobs:
+  validate:
+    name: Validate pinned full GPU/userland patchset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch full upstream Flame 0124
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git "$FLAME_FULL_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$FLAME_FULL_REV"
+          python3 coral/prepare_upstream_flame.py source
+          python3 - <<'PY'
+          from pathlib import Path
+          patches={p.name for p in Path("source/xnu/patches").glob("*.patch")}
+          for n in [28,30,34,46,58,61,78,83,84,85,89,95,96,97,104,112,115,116,119,122,124]:
+              assert any(x.startswith(f"{n:04d}-") for x in patches), f"Missing Flame patch {n:04d}"
+          overlay=Path("coral/port_flame_full_xnu.py").read_text()
+          for forbidden in ("fastboot flash", "adb push", "dd of=", "subprocess.run"):
+              assert forbidden not in overlay, forbidden
+          assert "GPU_MAPPED = 0x1200000" in overlay
+          assert "1440, 3040, 5760" in overlay
+          print(f"PASS: {len(patches)} full Flame patch files, guarded Coral geometry overlay, no phone access")
+          PY
+  macos_kernel:
+    name: Compile opt-in future userdata-only writable XNU source
+    needs: validate
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Pin full Flame source and XNU build framework
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git "$FLAME_FULL_REV"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$FLAME_FULL_REV"
+          python3 coral/prepare_upstream_flame.py source
+          git init -q dxb
+          git -C dxb fetch -q --depth 1 https://github.com/blacktop/darwin-xnu-build.git "$DXB_REV"
+          git -C dxb checkout -q --detach FETCH_HEAD
+          cp source/xnu/patches/*.patch source/xnu/patches/*.sh dxb/patches/
+          sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
+          grep -c 'VALID_ARCHS="x86_64 arm64e arm64"' dxb/build.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          f=Path("dxb/build.sh")
+          t=f.read_text()
+          marker="    patches\n    venv"
+          assert t.count(marker)==1, "STOP: blacktop source patch stage changed"
+          injection='    patches\n    python3 "$GITHUB_WORKSPACE/coral/port_flame_full_xnu.py" "$WORK_DIR/xnu"\n    python3 "$GITHUB_WORKSPACE/coral/port_flame_writable_root.py" "$WORK_DIR/xnu"\n    venv'
+          f.write_text(t.replace(marker,injection))
+          print("PASS: hook Coral after all Flame patches and before compilation")
+          PY
+      - name: Install macOS dependencies and select Xcode 15
+        run: |
+          brew install jq gum bash cmake ninja
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
+          sudo chmod +x /usr/local/bin/xcodes
+          XC=$(ls -d /Applications/Xcode_15*.app | sort -V | head -1)
+          test -n "$XC"
+          echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - name: Compile pinned Flame 0001-0124 with explicit future userdata-only opt-in
+        working-directory: dxb
+        env:
+          MAKEFLAGS: "-k"
+        run: bash build.sh
+      - name: Verify future userdata-only UFS write restrictions in compiled source
+        run: |
+          test -s dxb/fakeroot/System/Library/Kernels/kernel.development.sweet
+          file dxb/fakeroot/System/Library/Kernels/kernel.development.sweet
+          python3 - <<'PY'
+          from pathlib import Path
+          src=(Path("dxb/xnu/bsd/dev/sweet_ufs.c")).read_text()
+          must=[
+              "CORAL_WRITABLE_PROFILE",
+              "coraluserdatawrite",
+              "if (!su.writable) return EROFS;",
+              "lba < su.first_block",
+              "count > su.nblocks - (lba - su.first_block)",
+              "su.writable = (rw == 1 && coral_userdata_write == 1",
+              'strcmp(want, "userdata") == 0',
+              'PE_parse_boot_argn("coraluserdatawrite"',
+          ]
+          for token in must:
+              assert token in src,token
+          assert "su.writable = true;" not in src
+          assert "CORAL_MIRROR_FENCE" in src
+          print("PASS: separate future UFS write source requires exact userdata GPT, rw=1 AND coraluserdatawrite=1")
+          print("CRITICAL: HOST COMPILE ONLY. NOT HARDWARE TESTED OR SAFE TO FLASH.")
+          PY
+      - name: Publish separate compile-only kernel (NO device installation image)
+        run: |
+          mkdir -p coral-future-userdata-kernel
+          cp dxb/fakeroot/System/Library/Kernels/kernel.development.sweet coral-flame-0124-kernel/
+          (cd coral-flame-0124-kernel && shasum -a 256 kernel.development.sweet > SHA256SUMS)
+          cat > coral-flame-0124-kernel/README.txt <<'EOF'
+          EXPERIMENTAL: raw XNU Mach-O, NOT an Android boot.img and NOT tested on Coral.
+          FUTURE OPTIONAL PROFILE: only GPT-named userdata, ufsrw=1 and coraluserdatawrite=1 can permit writes.
+          Optional fixed-address 0x1fe000000 RAM-log mirror is disabled.
+          Full Flame XNU kernel with Coral native framebuffer geometry source changes.
+          The original Flame GPU DPU/panel registers and RAM carveouts need validation
+          on Pixel 4 XL before any temporary hardware boot.
+          UFS root, touchscreen and actual userland remain untested on Coral.
+          NO boot.img is created by this workflow. DO NOT FLASH. This has not passed any physical UFS test.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-userdata-write-kernel-COMPILE-ONLY
+          path: coral-flame-0124-kernel/
+          retention-days: 14
+          if-no-files-found: error
