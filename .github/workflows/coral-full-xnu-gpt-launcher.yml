@@ -1,0 +1,33 @@
+name: CORAL XNU read-only GPT diagnostic launcher preflight
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - "coral/test_full_xnu_ufs.py"
+      - "coral/tests/test_full_xnu_ufs_launcher.py"
+      - ".github/workflows/coral-full-xnu-gpt-launcher.yml"
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python syntax and synthetic device guards only
+        run: |
+          python3 -m py_compile coral/test_full_xnu_ufs.py
+          python3 -m unittest discover -s coral/tests -p "test_full_xnu_ufs_launcher.py" -v
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path("coral/test_full_xnu_ufs.py").read_text()
+          assert "BOOT_CORAL_UFS_DIAG" in s
+          assert '"fastboot","boot"' in s
+          assert "coralufsdiag" in s
+          assert '"kernel_has_three_ufs_write_fences"' in s
+          assert "fastboot flash" not in s
+          assert "fastboot erase" not in s
+          assert "dd of=" not in s
+          print("PASS: ONLY opt-in temporary fastboot boot, no device storage writes")
+          PY
