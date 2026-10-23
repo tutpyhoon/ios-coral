@@ -1,0 +1,84 @@
+name: Coral full Flame XNU QEMU boot smoke (no phone)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - '.github/workflows/coral-flame-full-qemu.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  boot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU ARM64, LLVM and GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-arm llvm
+          command -v gh
+          command -v llvm-nm
+      - name: Fetch proven compilation artifact and pinned Flame tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git 745c4341af86089efb0df851fa8a27fb8face624
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/prepare_upstream_flame.py source
+          mkdir -p kernel
+          gh run download 39869118799 -R tutpyhoon/ios-coral -n coral-flame-full-xnu0124-UNTESTED --dir kernel
+          (cd kernel && sha256sum -c SHA256SUMS)
+          test -s kernel/kernel.development.sweet
+      - name: Build Coral QEMU ADT and full XNU memory payload
+        run: |
+          python3 source/tools/mkadt.py coral-qemu.adt --qemu
+          python3 source/tools/mkpayload.py \
+            kernel/kernel.development.sweet coral-qemu.adt coral-qemu.bin \
+            --cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 rd=md0 sweetgpu=0 rootrw=0 ufsrw=0"
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          b=Path("coral-qemu.bin").read_bytes()
+          assert b[:8]==b"SWEETXNU"
+          assert struct.unpack_from("<Q",b,0x38)[0]==0xb0000000
+          print("PASS: validated payload header, low-memory QEMU geometry, no UFS device/root filesystem")
+          PY
+      - name: Run 35s QEMU, capture unmodified evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("source/tools/qemu-sweet.py")
+          s=p.read_text()
+          old="FB_BASE, FB_W, FB_H = 0x9c000000, 1080, 2400"
+          assert s.count(old)==1
+          p.write_text(s.replace(old, "FB_BASE, FB_W, FB_H = 0x9c400000, 1440, 3040"))
+          PY
+          python3 source/tools/qemu-sweet.py coral-qemu.bin evidence \
+            --secs 35 --kernel kernel/kernel.development.sweet || true
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("evidence/result.json")
+          assert p.is_file(),"QEMU returned no structured result"
+          r=json.loads(p.read_text())
+          print("QEMU diagnostic outcome (NOT hardware):",r)
+          assert Path("evidence/qemu.log").is_file()
+          assert Path("evidence/serial.txt").is_file()
+          assert r.get("status")!="qemu_exited","Full kernel exited QEMU prematurely"
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coral-flame-full-qemu-diagnostics
+          path: |
+            evidence/result.json
+            evidence/fb.png
+            evidence/fb.txt
+            evidence/regs.txt
+            evidence/serial.txt
+            evidence/qemu.log
+          retention-days: 14
+          if-no-files-found: warn
