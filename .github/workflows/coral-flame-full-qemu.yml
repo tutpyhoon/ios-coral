@@ -1,4 +1,4 @@
-name: Coral full Flame XNU QEMU with Phase11 HFS RAM root (no phone)
+name: Coral mirror-disabled full XNU QEMU with Phase11 HFS (no phone)
 on:
   workflow_dispatch:
   push:
@@ -29,7 +29,13 @@ jobs:
           git -C source checkout -q --detach FETCH_HEAD
           python3 coral/prepare_upstream_flame.py source
           mkdir -p kernel
-          gh run download 39876050024 -R tutpyhoon/ios-coral -n coral-flame-full-xnu0124-UNTESTED --dir kernel
+          for i in $(seq 1 24); do
+            if gh run download 39877872089 -R tutpyhoon/ios-coral               -n coral-flame-full-xnu0124-UNTESTED --dir kernel; then
+              break
+            fi
+            if [ "$i" = 24 ]; then echo "sanitized mirror-disabled kernel unavailable"; exit 1; fi
+            sleep 10
+          done
           (cd kernel && sha256sum -c SHA256SUMS)
           test -s kernel/kernel.development.sweet
           mkdir -p hfs
@@ -49,7 +55,7 @@ jobs:
           assert b[:8]==b"SWEETXNU"
           assert struct.unpack_from("<Q",b,0x38)[0]==0xb0000000
           assert b"RAMDisk" in b and b"CORAL11: child exec succeeded" in Path("hfs/flame-root.hfs").read_bytes()
-          print("PASS: validated payload header, low-memory QEMU geometry, no UFS device/root filesystem")
+          print("PASS: validated payload header, low-memory QEMU geometry and memory-only HFS root")
           PY
       - name: Run 35s QEMU, capture unmodified evidence
         run: |
@@ -72,7 +78,7 @@ jobs:
           print("QEMU diagnostic outcome (NOT hardware):",r)
           assert Path("evidence/qemu.log").is_file()
           assert Path("evidence/serial.txt").is_file()
-          assert r.get("status")!="qemu_exited","Full kernel exited QEMU prematurely"
+          assert r.get("status")=="no_panic_observed",                  "Kernel not healthy in QEMU: "+repr(r)
           if Path("evidence/fb.txt").is_file():
               text=Path("evidence/fb.txt").read_text()
               for marker in ("CORAL11: PID1 HFS+ root active",
