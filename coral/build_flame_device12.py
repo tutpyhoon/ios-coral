@@ -150,7 +150,8 @@ def build(source,tools_dir,kernel,ramroot,reference,out,root_mode="ram"):
             raise ValueError("Unsafe UFS activation in RAM-root test")
         required=(b"rd=md0",b"ufsrw=0",b"rootrw=0",b"sweetgpu=0")
     else:
-        if b"rd=md0" in payload or b"RAMDisk" in payload:
+        # XNU Mach-O contains the literal RAMDisk device name as code; not an ADT RAM root.
+        if b"rd=md0" in payload:
             raise ValueError("UFS-root build unexpectedly contains a RAM root")
         required=(b"rd=ufsroot0",b"ufsroot=userdata",b"ufsrw=1",
                   b"rootrw=1",b"ignition_level=1",b"sweetgpu=0")
