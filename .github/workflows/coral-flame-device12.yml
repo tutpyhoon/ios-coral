@@ -66,6 +66,8 @@ jobs:
           python3 input-tools/flame/fetch.py
           mkdir -p input-tools/downloads/mkbootimg input-tools/downloads/avb
           cp input-tools/research/flame-sources/mkbootimg.py input-tools/downloads/mkbootimg/mkbootimg.py
+          mkdir -p input-tools/downloads/mkbootimg/gki
+          cp input-tools/research/flame-sources/gki/generate_gki_certificate.py input-tools/downloads/mkbootimg/gki/
           cp input-tools/research/flame-sources/avbtool.py input-tools/downloads/avb/avbtool.py
       - name: Package AArch64 Coral full XNU with source-built RAM root
         run: |
