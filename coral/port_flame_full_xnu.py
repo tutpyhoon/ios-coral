@@ -65,6 +65,34 @@ def port(root, *, dry_run=False):
     for rel,before,after in substitutions:
         changes.append(replace_exact(root,rel,before,after,dry_run=dry_run))
 
+    # Full Flame contains WRITE(10) storage paths. Our first Coral kernel
+    # must deny all media writes, even if someone supplies ufsrw=1.
+    # Three independent barriers: low-level CDB submission, write helper,
+    # and writable state. These are compile-level guards, not a boot permit.
+    ufs_rel = "bsd/dev/sweet_ufs.c"
+    changes.append(replace_exact(
+        root, ufs_rel,
+        "ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)\n{",
+        "ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)\n"
+        "{\n"
+        "    /* CORAL_MEDIA_WRITE_FENCE: never submit device write or erase. */\n"
+        "    if (write || (cdb_len && (cdb[0] == 0x2a || cdb[0] == 0xaa ||\n"
+        "                              cdb[0] == 0x35 || cdb[0] == 0x42)))\n"
+        "        return EROFS;",
+        dry_run=dry_run))
+    changes.append(replace_exact(
+        root, ufs_rel, "su.writable = (rw != 0);",
+        "su.writable = false; /* CORAL_MEDIA_WRITE_FENCE: ignore ufsrw */",
+        dry_run=dry_run))
+    changes.append(replace_exact(
+        root, ufs_rel,
+        "ufs_write_blocks(uint64_t lba, uint32_t count)\n{",
+        "ufs_write_blocks(uint64_t lba, uint32_t count)\n"
+        "{\n"
+        "    /* CORAL_MEDIA_WRITE_FENCE: block direct WRITE(10) helper use. */\n"
+        "    return EROFS;",
+        dry_run=dry_run))
+
     # These are bounds checks, *not* an endorsement of the Flame panel
     # register writes. There are panel timing and mixer geometry differences.
     s=(root/"bsd/dev/sweet_gpu.c").read_text()
@@ -75,13 +103,17 @@ def port(root, *, dry_run=False):
     for token in ("ufs_read_blocks(", "ufs_write_blocks("):
         if token not in s:
             raise ValueError("STOP: full upstream XNU UFS driver not present")
+    if not dry_run:
+        for marker in ("CORAL_MEDIA_WRITE_FENCE", "su.writable = false;"):
+            if marker not in s:
+                raise ValueError("STOP: failed to fence UFS writes: " + marker)
     s=(root/"iokit/Kernel/arm/SweetFramebuffer.cpp").read_text()
     if "sweet_gpu_panel_stride(" not in s:
         raise ValueError("STOP: full upstream GPU display path absent")
 
     print("PASS: CORAL XNU 0124 geometry source overlay", len(changes),
-          " guarded replacements; read/write UFS and GPU present are "
-          "compiled but NOT hardware validated. NO BOOT IMAGE.")
+          " guarded replacements; device media writes FENCED; GPU/panel "
+          "still NOT validated on Coral. NO BOOT IMAGE.")
 
 if __name__=="__main__":
     p=argparse.ArgumentParser(description=__doc__)
