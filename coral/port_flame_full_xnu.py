@@ -93,6 +93,32 @@ def port(root, *, dry_run=False):
         "    return EROFS;",
         dry_run=dry_run))
 
+    # Optional CORAL read-only UFS discovery while remaining rooted on md0.
+    # The full 0124 kernel already contains sweet_ufs_rootdev(), whose
+    # init performs UFS host takeover, TEST UNIT READY, and GPT partition
+    # enumeration. When coralufsdiag=1 AND rd=md0, run it as a nonfatal
+    # diagnostic before the existing md root path; return to md0 regardless.
+    # CORAL_MEDIA_WRITE_FENCE above remains active for every boot mode.
+    iokit_rel="iokit/bsddev/IOKitBSDInit.cpp"
+    changes.append(replace_exact(
+        root, iokit_rel,
+        'if (strcmp(rdBootVar, "ufsroot0") == 0) {',
+        'if (strcmp(rdBootVar, "md0") == 0) {\n'
+        '        int coralufsdiag = 0;\n'
+        '        (void)PE_parse_boot_argn("coralufsdiag", &coralufsdiag,\n'
+        '                                sizeof(coralufsdiag));\n'
+        '        if (coralufsdiag == 1) {\n'
+        '            /* CORAL_UFS_DIAG_READ_ONLY: inspect GPT, retain md0 root. */\n'
+        '            extern int sweet_ufs_rootdev(dev_t *dev);\n'
+        '            dev_t coral_probe_dev = 0;\n'
+        '            int coral_rc = sweet_ufs_rootdev(&coral_probe_dev);\n'
+        '            IOLog("CORAL UFS DIAG: GPT userdata %s, rc=%d\\n",\n'
+        '                  coral_rc == 0 ? "FOUND" : "FAILED", coral_rc);\n'
+        '        }\n'
+        '    }\n'
+        '    if (strcmp(rdBootVar, "ufsroot0") == 0) {',
+        dry_run=dry_run))
+
     # Disable optional Flame RAM log mirror completely. The upstream
     # mirror writes to fixed PA 0x1fe000000, which is not mapped in
     # the 4 GiB QEMU guest and has not been proven safe on Coral.
