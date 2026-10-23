@@ -12,6 +12,15 @@ The upstream Pixel 4 (`flame`) has independently reported a real iOS
 home-screen and Metal pipeline; these are **not** transferable success
 claims for this Pixel 4 XL port.
 
+
+> **October 22 kernel audit correction:** The compiled CORAL XNU kernel contains
+> three unconditional UFS write fences. Even if an older boot image passes
+> `ufsrw=1`, that does *not* enable storage writes. The latest UFS-root
+> image intentionally requests `ufsrw=0 rootrw=0`. Apple launchd and
+> SpringBoard have **not** been tested from such a read-only root. Run the
+> separate `coral-full-flame-UFS-GPT-DIAG-UNTESTED` RAM-root probe **before**
+> considering a full `userdata` replacement; it does not require wiping.
+
 ## What is built and available
 
 - **Full Flame kernel + RAM test:** [run 39889361147](https://github.com/tutpyhoon/ios-coral/actions/runs/39889361147),
@@ -20,10 +29,10 @@ claims for this Pixel 4 XL port.
   not Apple's code. Used for **non-destructive temporary physical boot**.
 - **Full Flame kernel + real iOS UFS root candidate:** *same run*, artifact
   `coral-full-flame-UFS-UNTESTED`. Boot args `rd=ufsroot0`,
-  `ufsroot=userdata`, `ufsrw=1`, `rootrw=1`,
+  `ufsroot=userdata`, `ufsrw=0`, `rootrw=0`,
   `ignition_level=1`, `sweetgpu=0`. It includes **no iOS userland files**;
   those live on the private raw HFS+ image installed on userdata.
-  **This version permits controller/partition writes** and has not booted
+  **This version hard-blocks SCSI media writes in the compiled kernel** and has not booted
   or shown SpringBoard on Pixel 4 XL. Only consider it **after** checking
   the RAM candidate and your own recoverability.
 - `coral/finalize_ios_root.py`: Mac-local iOS image export from the
