@@ -93,6 +93,19 @@ def port(root, *, dry_run=False):
         "    return EROFS;",
         dry_run=dry_run))
 
+    # Disable optional Flame RAM log mirror completely. The upstream
+    # mirror writes to fixed PA 0x1fe000000, which is not mapped in
+    # the 4 GiB QEMU guest and has not been proven safe on Coral.
+    # This was the confirmed first QEMU panic at _sweet_log_mirror_start.
+    # The ring stays in normal mapped kernel memory (sweet_log_ring).
+    changes.append(replace_exact(
+        root, ufs_rel,
+        "sweet_log_mirror_start(void)\n{\n",
+        "sweet_log_mirror_start(void)\n{\n"
+        "    /* CORAL_MIRROR_FENCE: unverified high-memory mirror disabled. */\n"
+        "    return;\n",
+        dry_run=dry_run))
+
     # These are bounds checks, *not* an endorsement of the Flame panel
     # register writes. There are panel timing and mixer geometry differences.
     s=(root/"bsd/dev/sweet_gpu.c").read_text()
@@ -104,7 +117,7 @@ def port(root, *, dry_run=False):
         if token not in s:
             raise ValueError("STOP: full upstream XNU UFS driver not present")
     if not dry_run:
-        for marker in ("CORAL_MEDIA_WRITE_FENCE", "su.writable = false;"):
+        for marker in ("CORAL_MEDIA_WRITE_FENCE", "su.writable = false;", "CORAL_MIRROR_FENCE"):
             if marker not in s:
                 raise ValueError("STOP: failed to fence UFS writes: " + marker)
     s=(root/"iokit/Kernel/arm/SweetFramebuffer.cpp").read_text()
