@@ -106,6 +106,32 @@ def port(root, *, dry_run=False):
         "    return;\n",
         dry_run=dry_run))
 
+    # The generic QEMU 'virt' machine has no Qualcomm PMIC/SPMI MMIO at
+    # 0x0c440000. A post-mirror emulated boot panicked in
+    # _sweet_spmi_init+156 on an unmapped read at this physical address.
+    # A special opt-in boot argument disables this one hardware probe in
+    # QEMU ONLY. The real Coral phone never sets 'coralqemu=1'.
+    spmi_rel = "bsd/dev/sweet_spmi.c"
+    changes.append(replace_exact(
+        root, spmi_rel,
+        "#include <IOKit/IOLocks.h>\n",
+        "#include <IOKit/IOLocks.h>\n"
+        "#include <pexpert/pexpert.h>\n",
+        dry_run=dry_run))
+    changes.append(replace_exact(
+        root, spmi_rel,
+        "sweet_spmi_init(void)\n{\n",
+        "sweet_spmi_init(void)\n{\n"
+        "    int coral_qemu_no_spmi = 0;\n"
+        "    (void)PE_parse_boot_argn(\"coralqemu\", &coral_qemu_no_spmi,\n"
+        "                            sizeof(coral_qemu_no_spmi));\n"
+        "    if (coral_qemu_no_spmi == 1) {\n"
+        "        /* CORAL_QEMU_SPMI_FENCE: generic virt has no Qualcomm PMIC. */\n"
+        "        printf(\"CORAL QEMU: Qualcomm SPMI MMIO disabled\\n\");\n"
+        "        return -1;\n"
+        "    }\n",
+        dry_run=dry_run))
+
     # These are bounds checks, *not* an endorsement of the Flame panel
     # register writes. There are panel timing and mixer geometry differences.
     s=(root/"bsd/dev/sweet_gpu.c").read_text()
