@@ -5,6 +5,8 @@ on:
     branches: [coral-flame-port]
     paths:
       - "coral/finalize_ios_root.py"
+      - "coral/hfs_partition_extract.py"
+      - "coral/tests/test_hfs_partition_extract.py"
       - "coral/tests/test_finalize_ios_root.py"
       - ".github/workflows/coral-flame-root-finalize.yml"
 permissions:
@@ -16,8 +18,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          python3 -m py_compile coral/finalize_ios_root.py
+          python3 -m py_compile coral/finalize_ios_root.py coral/hfs_partition_extract.py
           python3 -m unittest discover -s coral/tests -p "test_finalize_ios_root.py" -v
+          python3 -m unittest discover -s coral/tests -p "test_hfs_partition_extract.py" -v
           python3 - <<'PY'
           import ast
           from pathlib import Path
@@ -43,7 +46,7 @@ jobs:
           import subprocess,tempfile,sys
           from pathlib import Path
           sys.path.insert(0,'coral')
-          from finalize_ios_root import check_hfs_bytes
+          from hfs_partition_extract import locate_gpt_hfs, remove_gpt_inplace, hfs_header_at
           with tempfile.TemporaryDirectory(prefix="coral-native-udrw-") as d:
               root=Path(d)
               inp=root/"synthetic.sparseimage"
@@ -54,10 +57,17 @@ jobs:
               subprocess.run(["hdiutil","convert",str(inp),"-format","UDRW",
                               "-o",str(out)],check=True)
               assert inp.exists() and out.exists()
-              raw=check_hfs_bytes(out)
-              print("Observed macOS UDRW raw header:",raw)
-              assert raw["signature"] in ("H+","HX")
-              assert raw["raw_bytes"]>=128*1024*1024-4096
-              assert raw["udif_trailer_bytes"] in (0,512)
+              gpt=locate_gpt_hfs(out)
+              print("Detected Apple HFS GPT wrapper:",gpt)
+              assert gpt["gpt_header_crc_verified"]
+              assert gpt["gpt_entry_array_crc_verified"]
+              assert gpt["offset_bytes"]>512
+              raw=remove_gpt_inplace(out)
+              print("Raw HFS after GPT extraction:",raw)
+              assert out.stat().st_size==gpt["volume_bytes"]
+              with out.open("rb") as fd:
+                  hfs=hfs_header_at(fd,0,out.stat().st_size)
+              assert hfs["signature"] in ("H+","HX")
+              assert hfs["actual_fs_bytes"]<=gpt["volume_bytes"]
               print("PASS: real macOS HFS+ create/UDRW convert/verified filesystem blocks")
           PY
