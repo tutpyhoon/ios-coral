@@ -107,6 +107,10 @@ jobs:
           helper=p.split("ufs_write_blocks(uint64_t lba, uint32_t count)",1)[1]
           assert "return EROFS;" in helper[:200]
           assert "su.writable = false;" in p
+          mirror=p.split("sweet_log_mirror_start(void)",1)[1]
+          assert "CORAL_MIRROR_FENCE" in mirror[:350]
+          assert "return;" in mirror[:350]
+          print("PASS: unsafe high-memory RAM-log mirror disabled for Coral")
           print("PASS: all 3 CORAL write fences built into kernel source")
           PY
           echo "PASS: full upstream XNU compilation and Coral geometry source present"
@@ -118,6 +122,7 @@ jobs:
           cat > coral-flame-0124-kernel/README.txt <<'EOF'
           EXPERIMENTAL: raw XNU Mach-O, NOT an Android boot.img and NOT tested on Coral.
           CORAL overlay fences all UFS SCSI write operations and ignores ufsrw=1.
+          Optional fixed-address 0x1fe000000 RAM-log mirror is disabled.
           Full Flame XNU kernel with Coral native framebuffer geometry source changes.
           The original Flame GPU DPU/panel registers and RAM carveouts need validation
           on Pixel 4 XL before any temporary hardware boot.
