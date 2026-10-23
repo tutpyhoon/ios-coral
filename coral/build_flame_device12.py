@@ -33,9 +33,13 @@ CMDLINE=(
 )
 UFS_CMDLINE=(
     "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress "
-    "rd=ufsroot0 ufsroot=userdata ufsrw=1 rootrw=1 sweetgpu=0 "
+    "rd=ufsroot0 ufsroot=userdata ufsrw=0 rootrw=0 sweetgpu=0 "
     "unentitled_ios_sim_launch=1 ignition_level=1 launchd_unsecure_cache=1 "
     "wdt_test=no_user_checkin wdt=-1"
+)
+UFS_DIAG_CMDLINE=(
+    "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress "
+    "rd=md0 rootrw=0 ufsrw=0 coralufsdiag=1 sweetgpu=0 wdt=-1"
 )
 SOURCES="start.S shim.c console.c log.c util.c mmu.c fdt.c loader.c ufs.c spmi.c sde.c showlog.c diag.c disptest.c gpuprobe.c gpufw.S smmuprobe.c ramlog.c".split()
 
@@ -92,7 +96,7 @@ def patch_adt(path, tools_dir):
 
 
 def build(source,tools_dir,kernel,ramroot,reference,out,root_mode="ram"):
-    if root_mode not in ("ram","ufs"):
+    if root_mode not in ("ram","ufs","ufsdiag"):
         raise ValueError("Only RAM test or physical UFS root modes are available")
     source=source.expanduser().resolve(strict=True)
     tools_dir=tools_dir.expanduser().resolve(strict=True)
@@ -137,24 +141,29 @@ def build(source,tools_dir,kernel,ramroot,reference,out,root_mode="ram"):
     ram=patch_adt(adt_path,source/"tools")
     payload_args=[sys.executable,source/"tools/mkpayload.py",kernel,
                   adt_path,payload_path,"--cmdline",
-                  CMDLINE if root_mode=="ram" else UFS_CMDLINE]
-    if root_mode=="ram":
+                  UFS_CMDLINE if root_mode=="ufs" else
+                  (UFS_DIAG_CMDLINE if root_mode=="ufsdiag" else CMDLINE)]
+    if root_mode in ("ram","ufsdiag"):
         payload_args.extend(["--ramdisk",ramroot])
     run(payload_args)
     payload=payload_path.read_bytes()
     assert payload[:8]==b"SWEETXNU"
     if b"coralqemu=1" in payload:
         raise ValueError("Physical package must not contain the emulator-only boot argument")
-    if root_mode=="ram":
+    if root_mode in ("ram","ufsdiag"):
         if any(x in payload for x in (b"rd=ufsroot0",b"ufsrw=1",b"rootrw=1")):
             raise ValueError("Unsafe UFS activation in RAM-root test")
         required=(b"rd=md0",b"ufsrw=0",b"rootrw=0",b"sweetgpu=0")
+        if root_mode=="ufsdiag":
+            required += (b"coralufsdiag=1",)
+        elif b"coralufsdiag=1" in payload:
+            raise ValueError("Unexpected XNU UFS diagnostic in base RAM test")
     else:
-        # XNU Mach-O contains the literal RAMDisk device name as code; not an ADT RAM root.
+        # XNU Mach-O contains the literal RAMDisk name as code, not an ADT RAM root.
         if b"rd=md0" in payload:
             raise ValueError("UFS-root build unexpectedly contains a RAM root")
-        required=(b"rd=ufsroot0",b"ufsroot=userdata",b"ufsrw=1",
-                  b"rootrw=1",b"ignition_level=1",b"sweetgpu=0")
+        required=(b"rd=ufsroot0",b"ufsroot=userdata",b"ufsrw=0",
+                  b"rootrw=0",b"ignition_level=1",b"sweetgpu=0")
     if not all(x in payload for x in required):
         raise ValueError("Missing boot arguments for selected root mode")
     if struct.unpack_from("<Q",payload,0x38)[0]!=PHYS_BASE:
@@ -218,14 +227,17 @@ def build(source,tools_dir,kernel,ramroot,reference,out,root_mode="ram"):
         "ios_springboard":False,
         "apple_launchd":False,
         "root":("source-built Phase11 16MiB HFS+ RAM only" if root_mode=="ram" else
-                "UFS partition named userdata: REAL iPhone X OS from private flashed HFS+ root"),
+                "Phase11 RAM HFS+ with XNU-only UFS GPT diagnostic" if root_mode=="ufsdiag" else
+                "UFS partition named userdata: read-only private iOS HFS+ root"),
         "root_mode":root_mode,
-        "ufs_media_write_commands_enabled":root_mode=="ufs",
+        "ufs_media_write_commands_enabled":False,
+        "kernel_has_three_ufs_write_fences":True,
+        "coralufsdiag":root_mode=="ufsdiag",
         "tested_with_apple_launchd":False,
         "userdata_must_be_installed_first":root_mode=="ufs",
         "ram":ram,
         "kernel_sha256":sha(kernel.read_bytes()),
-        "hfs_sha256":sha(ramroot.read_bytes()) if root_mode=="ram" else None,
+        "hfs_sha256":sha(ramroot.read_bytes()) if root_mode in ("ram","ufsdiag") else None,
         "boot_sha256":sha(image),
         "boot_img":out.name,
         "dtb_sha256":sha(dtb2),
@@ -243,7 +255,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ("source","tools","kernel","ramroot","reference_boot","output"):
         p.add_argument("--"+name.replace("_","-"),type=Path,required=True)
-    p.add_argument("--root-mode",choices=("ram","ufs"),default="ram")
+    p.add_argument("--root-mode",choices=("ram","ufs","ufsdiag"),default="ram")
     args=p.parse_args()
     build(args.source,args.tools,args.kernel,args.ramroot,
           args.reference_boot,args.output,args.root_mode)
