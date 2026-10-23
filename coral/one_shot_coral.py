@@ -62,7 +62,9 @@ def checked_boot_img(folder):
     if manifest.get("full_flame_source_pin")!=UPSTREAM_SHA or manifest.get("model")!="Pixel 4 XL (coral)":
         raise RuntimeError("Downloaded artifact has an unexpected source or phone")
     expected=manifest.get("boot_sha256")
-    if hashlib.file_digest(img.open("rb"),"sha256").hexdigest()!=expected:
+    with img.open("rb") as f:
+        actual=hashlib.file_digest(f,"sha256").hexdigest()
+    if actual!=expected:
         raise RuntimeError("Full Flame UFS boot image checksum mismatch")
     digest=sha_path.read_text().strip().split()[0]
     if digest!=expected:
