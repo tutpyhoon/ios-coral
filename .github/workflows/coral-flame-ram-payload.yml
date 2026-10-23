@@ -40,61 +40,54 @@ jobs:
               assert m in x
           print("PASS: unchanged Phase11 RAM filesystem and two custom processes")
           PY
-      - name: Fetch pinned former working Coral hardware-payload toolkit
+      - name: Fetch the exact full Flame payload tools used in passed QEMU
         run: |
-          git init -q tools
-          git -C tools fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git b91463ab1ef083f81f6c3393593385aa996ceaf0
-          git -C tools checkout -q --detach FETCH_HEAD
-          python3 coral/stage05.py prepare tools
-          python3 tools/flame/fetch.py
-      - name: Assemble full XNU plus HFS in a RAM-only Coral engineering payload
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git 745c4341af86089efb0df851fa8a27fb8face624
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/prepare_upstream_flame.py source
+      - name: Pack Coral ADT, full XNU Mach-O and 16 MiB HFS+ RAM only
         run: |
-          mkdir -p input
-          cp kernel/kernel.development.sweet root/flame-root.hfs root/flame-fs-init input/
-          cd tools
-          python3 flame/pack_kernel.py ../input --hfs-root
-      - name: Verify device, memory boundaries, read-only storage policy
+          python3 source/tools/mkadt.py coral-full-ram.adt --qemu
+          python3 source/tools/mkpayload.py \
+            kernel/kernel.development.sweet coral-full-ram.adt coral-full-ram.payload \
+            --cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 rd=md0 sweetgpu=0 rootrw=0 ufsrw=0 coralqemu=1" \
+            --ramdisk root/flame-root.hfs
+      - name: Verify packed payload's read-only RAM root, geometry and build inputs
         run: |
           python3 - <<'PY'
-          import hashlib,json
           from pathlib import Path
-          manifest=json.loads(Path("tools/flame/out/flame-early-manifest.json").read_text())
-          payload=Path("tools/flame/out/flame-early.payload").read_bytes()
-          src=Path("kernel/kernel.development.sweet").read_bytes()
+          import hashlib,json,struct
+          kernel=Path("kernel/kernel.development.sweet").read_bytes()
           hfs=Path("root/flame-root.hfs").read_bytes()
-          assert manifest["kernel_sha256"]==hashlib.sha256(src).hexdigest()
-          assert manifest["ram_root_sha256"]==hashlib.sha256(hfs).hexdigest()
-          assert manifest["payload_sha256"]==hashlib.sha256(payload).hexdigest()
-          assert manifest["hfs_root"] is True
-          assert b"google,coral" in payload
-          assert b"Google Pixel 4 XL" in payload
-          assert b"rd=md0" in payload
-          assert b"RAMDisk" in payload
+          payload=Path("coral-full-ram.payload").read_bytes()
+          adt=Path("coral-full-ram.adt").read_bytes()
+          assert payload[:8]==b"SWEETXNU"
+          assert struct.unpack_from("<Q",payload,0x38)[0]==0xb0000000
+          for marker in (b"rd=md0",b"RAMDisk",b"coralqemu=1",
+                         b"sweetgpu=0",b"rootrw=0",b"ufsrw=0"):
+              assert marker in payload,marker
+          for marker in (b"google,coral",b"Google Pixel 4 XL"):
+              assert marker in adt,marker
           assert b"CORAL11: child exec succeeded" in hfs
-          assert b"ufsrw=1" not in payload
           assert b"rd=ufsroot0" not in payload
           out=Path("coral-full-flame-ram-preflight")
           out.mkdir()
-          (out/"manifest.json").write_text(json.dumps({
-              "qemu_run":39883467416,
-              "kernel_build_run":39883218082,
-              "full_flame_xnu_sha256":hashlib.sha256(src).hexdigest(),
-              "hfs_sha256":hashlib.sha256(hfs).hexdigest(),
-              "payload_sha256":hashlib.sha256(payload).hexdigest(),
-              "payload_size":len(payload),
-              "device":"coral",
-              "root":"16MiB HFS RAM only; synthetic PID1 not Apple launchd",
-              "phone_tested":False,
-              "flashable":False,
-              "hardware_carveouts_validated":False,
-              "status":"PREFLIGHT ONLY; physical boot image intentionally not generated"
-          },indent=2)+"\n")
+          m={"qemu_run":39883467416, "kernel_build_run":39883218082,
+             "kernel_sha256":hashlib.sha256(kernel).hexdigest(),
+             "hfs_sha256":hashlib.sha256(hfs).hexdigest(),
+             "adt_sha256":hashlib.sha256(adt).hexdigest(),
+             "payload_sha256":hashlib.sha256(payload).hexdigest(),
+             "payload_bytes":len(payload),
+             "device":"coral", "ram_only":True,"uses_emulator_adt":True,
+             "device_flashable":False,"hardware_carveouts_validated":False,
+             "status":"QEMU-compatible assembled payload only; NOT a phone boot image"}
+          (out/"manifest.json").write_text(json.dumps(m,indent=2)+"\n")
           (out/"README.txt").write_text(
-              "CORAL FULL XNU PHASE: HOST-ONLY RAM ROOT PAYLOAD PRECHECK\n"
-              "NO BOOT.IMG PRODUCED. NO APPLE USERLAND. NO INTERNAL STORAGE.\n"
-              "A raw payload is not suitable for fastboot boot or fastboot flash.\n"
-              "The high-RAM and Coral stock-DTB physical handoff remain unverified.\n")
-          print("PASS: full Flame XNU + source-built HFS RAM payload assembled and checked; no phone access")
+              "Full Coral XNU + HFS+ source-built test userspace, QEMU only.\n"
+              "NO Android boot.img; do NOT fastboot boot/flash this payload.\n"
+              "QEMU ADT and emulator-only coralqemu=1 bootarg are not physical Coral settings.\n")
+          print("PASS: validated QEMU-compatible raw XNU+HFS engineering payload")
           PY
       - uses: actions/upload-artifact@v4
         with:
