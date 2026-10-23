@@ -224,3 +224,50 @@ Two **separate** Android boot-header-v2 images are now successfully built from t
 - `coral/one_shot_coral.py` orchestrates local root export, pinned UFS boot artifact fetch, recovery/partition verification, provisioning backups, opt-in destructive userdata installation, and **temporary fastboot boot** of experimental UFS XNU. See `coral/INSTALL_ONE_SHOT.md`. Its CI tests do not actually touch a phone.
 
 **Critical limitation:** No full-Flame-XNU physical Coral boot has been photographed; no verified physical UFS-root mount or real Apple `launchd` start exists yet, and NO SpringBoard pixels or Metal acceleration have been observed on the Pixel 4 XL. New software artifacts are reproducible engineering candidates, not a completed port. Owner must run the actual hardware attempt and provide logs/images. The phone may hang and needs stock Coral recovery media.
+
+## 2026-10-22 follow-on: READ-ONLY XNU UFS-GPT diagnostic and logd
+
+**Kernel update:** Pinned full ios-flame 0124 XNU now contains an opt-in
+`coralufsdiag=1` branch in `IOKitBSDInit.cpp`. With `rd=md0` and
+`ufsrw=0`, XNU calls `sweet_ufs_rootdev` to take over the UFS host,
+issue bounded SCSI READ commands, and locate the actual GPT partition
+whose name is `userdata`. It logs
+`CORAL UFS DIAG: GPT userdata FOUND, rc=0` on success, then **continues
+booting the source-built HFS RAM root**. It does NOT require erasing
+Android userdata. It DOES still program host registers and use DMA, and
+has not yet been tested on the physical phone.
+
+**Verified builds:**
+- [Full XNU source compile 39891582692](https://github.com/tutpyhoon/ios-coral/actions/runs/39891582692): **PASSED**.
+- [Three diagnostic/boot image artifact build 39891811910](https://github.com/tutpyhoon/ios-coral/actions/runs/39891811910): **PASSED**. New artifact
+  `coral-full-flame-UFS-GPT-DIAG-UNTESTED`; the RAM and UFS-root
+  artifacts were also rebuilt using the new full kernel.
+- [Mac checksum-verified temporary-boot launcher 39892131970](https://github.com/tutpyhoon/ios-coral/actions/runs/39892131970): **PASSED synthetic tests**; run locally via
+  `python3 coral/test_full_xnu_ufs.py --run-id 39891811910 --execute --confirm BOOT_CORAL_UFS_DIAG`.
+  The script verifies the phone reports `coral` in fastboot and only
+  performs temporary `fastboot boot`, never `flash`/`erase`.
+
+**Important correction:** The upstream full kernel was already patched
+with **three unconditional SCSI media-write fences**. The earlier UFS
+variant had `ufsrw=1 rootrw=1` in its boot arguments, but those
+arguments never overrode the compiled fences. The current UFS-root
+artifact correctly uses `ufsrw=0 rootrw=0` and is **read-only**.
+Apple launchd/SpringBoard may fail from such a root. A future
+write-capable `userdata`-only kernel requires a separate vetted
+source/profile after the physical XNU GPT read works. Do NOT overwrite
+userdata based solely on a successful host compilation.
+
+**Userspace finalizer:** `coral/finalize_ios_root.py` now reproduces the
+upstream root builder's `logd` directories (UID/GID 272,
+`/private/var/db/{diagnostics,uuidtext}` and `.migrated` markers),
+provisions mobile preferences UID 501, checks Apple `launchd` removal
+of CommCenter, keybag plist, and relevant Setup/SpringBoard preference
+keys. [macOS + synthetic regression run 39892391670](https://github.com/tutpyhoon/ios-coral/actions/runs/39892391670) **PASSED**.
+The owner's complete real Apple sparseimage remains private and
+untested under this finalizer.
+
+**Current physical gap:** No full Flame 0124 kernel has been photographed
+booting on Pixel 4 XL. There is still no observed XNU-mounted real
+iOS UFS root, Apple launchd or SpringBoard, or Coral GPU acceleration.
+Full completion requires device-side evidence, panel firmware and
+correct root write services.
