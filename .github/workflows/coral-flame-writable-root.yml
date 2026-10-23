@@ -5,7 +5,7 @@ on:
     branches: [coral-flame-port]
     paths:
       - "coral/port_flame_writable_root.py"
-      - ".github/workflows/coral-flame-full-xnu.yml"
+      - ".github/workflows/coral-flame-writable-root.yml"
 permissions:
   contents: read
 env:
@@ -114,9 +114,9 @@ jobs:
       - name: Publish separate compile-only kernel (NO device installation image)
         run: |
           mkdir -p coral-future-userdata-kernel
-          cp dxb/fakeroot/System/Library/Kernels/kernel.development.sweet coral-flame-0124-kernel/
+          cp dxb/fakeroot/System/Library/Kernels/kernel.development.sweet coral-future-userdata-kernel/
           (cd coral-flame-0124-kernel && shasum -a 256 kernel.development.sweet > SHA256SUMS)
-          cat > coral-flame-0124-kernel/README.txt <<'EOF'
+          cat > coral-future-userdata-kernel/README.txt <<'EOF'
           EXPERIMENTAL: raw XNU Mach-O, NOT an Android boot.img and NOT tested on Coral.
           FUTURE OPTIONAL PROFILE: only GPT-named userdata, ufsrw=1 and coraluserdatawrite=1 can permit writes.
           Optional fixed-address 0x1fe000000 RAM-log mirror is disabled.
@@ -129,6 +129,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: coral-userdata-write-kernel-COMPILE-ONLY
-          path: coral-flame-0124-kernel/
+          path: coral-future-userdata-kernel/
           retention-days: 14
           if-no-files-found: error
