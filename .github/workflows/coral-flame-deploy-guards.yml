@@ -1,0 +1,34 @@
+name: CORAL USERDATA installer source safeguards (synthetic tests ONLY)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/deploy_ios_root.py'
+      - 'coral/tests/test_deploy_ios_root.py'
+      - '.github/workflows/coral-flame-deploy-guards.yml'
+permissions:
+  contents: read
+jobs:
+  no_phone_tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify guarded USERDATA installer, never run adb in CI
+        run: |
+          python3 -m py_compile coral/deploy_ios_root.py
+          python3 -m unittest discover -s coral/tests -p 'test_deploy_ios_root.py' -v
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path("coral/deploy_ios_root.py").read_text()
+          for marker in ["PARTNAME=userdata","--confirm", "ERASE_CORAL_USERDATA",
+                         'BYNAME+"/userdata"', '"persist","modemst1","modemst2","fsg","fsc"',
+                         '"dd of="+shlex.quote(phone["by_name"])',
+                         "read_device_block(phone[\"by_name\"],0)"]:
+              assert marker in s, marker
+          for forbidden in ["fastboot flash", "fastboot erase", "of=/dev/block/sda15",
+                            "adb reboot"]:
+              assert forbidden not in s,forbidden
+          print("PASS: exclusive GPT-named userdata target, backups, block read-back and opt-in only")
+          PY
