@@ -271,3 +271,25 @@ booting on Pixel 4 XL. There is still no observed XNU-mounted real
 iOS UFS root, Apple launchd or SpringBoard, or Coral GPU acceleration.
 Full completion requires device-side evidence, panel firmware and
 correct root write services.
+
+## Prepared future two-key writable userdata profile (separate host build)
+
+The ongoing real iOS launchd attempt will eventually require controlled
+writes to `/private/var`. After the full XNU UFS-GPT read-only diagnostic
+works on a physical Pixel 4 XL, the source-only extension
+`coral/port_flame_writable_root.py` can be evaluated. It must be applied
+AFTER the default hard-fenced source overlay, and changes the low-level
+`WRITE(10)` gate to open **only** when all are true:
+
+- The root is selected by GPT name `userdata` (not guessed partition ID).
+- Boot argument `ufsrw=1` is explicitly set.
+- Additional separate boot argument `coraluserdatawrite=1` is explicitly set.
+- Every `WRITE(10)` block range is still checked against
+  `su.first_block` and `su.nblocks`.
+- The fixed-address log mirror remains disabled.
+
+[Future kernel-only build run 39892849511](https://github.com/tutpyhoon/ios-coral/actions/runs/39892849511)
+is configured to compile this extension to a raw Mach-O artifact, NOT a
+bootable image. It is **not cleared for the phone** and is not referenced
+by any installer. The currently published RAM, UFS-GPT-DIAG and
+UFS-UNTESTED boot images remain in the three-fence read-only branch.
