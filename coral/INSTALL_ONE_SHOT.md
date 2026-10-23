@@ -61,6 +61,23 @@ claims for this Pixel 4 XL port.
   guarded userdata install and **temporary** `fastboot boot` of full
   XNU UFS image. It cannot observe SpringBoard or guarantee iOS boot.
 
+## CURRENT HARD BLOCK — do not run the destructive installer
+
+The current full-Flame-Coral XNU build is **read-only at the SCSI driver
+level** (three compiled UFS write fences). That prevents normal writable
+launchd/`/private/var` operation. The Mac one-shot program now **refuses
+these UFS images before userdata is touched**, even with
+`--confirm ERASE_CORAL_USERDATA`.
+
+First run the separate **temporary read-only GPT diagnostic** using
+`coral/test_full_xnu_ufs.py` and [GitHub run
+39891811910](https://github.com/tutpyhoon/ios-coral/actions/runs/39891811910).
+It checks XNU's actual GPT `userdata` discovery and keeps Android's
+filesystem intact. A subsequent new kernel build must safely enable
+bounded writes to *that partition only* and be tested before the full
+installer can proceed. The commands below describe the intended
+eventual installation, not an currently usable finish operation.
+
 ## Minimum preparation — on the actual Mac
 
 1. Back up all personal data. A `userdata` write cannot be undone
