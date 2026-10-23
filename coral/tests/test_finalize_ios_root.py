@@ -31,6 +31,20 @@ def fake(path, *, trailer=False, signature=b"H+"):
 
 
 class RawHfsTests(unittest.TestCase):
+    def test_logd_mobile_directory_setup_uses_upstream_numeric_owners(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(m,"sudo") as call:
+                m.prepare_userspace_dirs(Path(d))
+            commands=[a.args[0] for a in call.call_args_list]
+            self.assertEqual(len(commands),7)
+            self.assertEqual(
+                sum(1 for cmd in commands if "-o" in cmd and "272" in cmd),6)
+            self.assertEqual(
+                sum(1 for cmd in commands if "-o" in cmd and "501" in cmd),1)
+            self.assertEqual(
+                sum(1 for cmd in commands if ".migrated" in " ".join(map(str,cmd))),3)
+
     def test_valid_bare_hfs_plus(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"test.img"
