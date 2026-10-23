@@ -27,6 +27,7 @@ class OneShotTests(unittest.TestCase):
             j={
                 "root_mode":"ufs",
                 "userdata_must_be_installed_first":True,
+                "ufs_media_write_commands_enabled":True,
                 "full_flame_source_pin":app.UPSTREAM_SHA,
                 "model":"Pixel 4 XL (coral)",
                 "boot_sha256":"deadbeef"
@@ -46,6 +47,7 @@ class OneShotTests(unittest.TestCase):
             j={
                 "root_mode":"ufs",
                 "userdata_must_be_installed_first":True,
+                "ufs_media_write_commands_enabled":True,
                 "full_flame_source_pin":app.UPSTREAM_SHA,
                 "model":"Pixel 4 XL (coral)",
                 "boot_sha256":digest
@@ -53,6 +55,25 @@ class OneShotTests(unittest.TestCase):
             (folder/"manifest.json").write_text(json.dumps(j))
             (folder/"SHA256SUMS").write_text(digest+"  "+img.name+"\n")
             self.assertEqual(app.checked_boot_img(folder),img)
+
+    def test_refuse_readonly_kernel_before_destructive_install(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder=Path(d)
+            img=folder/"coral-full-flame-UFS-UNTESTED.img"
+            data=b"synthetic kernel"
+            img.write_bytes(data)
+            digest=hashlib.sha256(data).hexdigest()
+            j={
+                "root_mode":"ufs",
+                "userdata_must_be_installed_first":True,
+                "ufs_media_write_commands_enabled":False,
+                "full_flame_source_pin":app.UPSTREAM_SHA,
+                "model":"Pixel 4 XL (coral)",
+                "boot_sha256":digest}
+            (folder/"manifest.json").write_text(json.dumps(j))
+            (folder/"SHA256SUMS").write_text(digest+"  "+img.name+"\n")
+            with self.assertRaisesRegex(RuntimeError,"STOP BEFORE USERDATA ERASE"):
+                app.checked_boot_img(folder)
 
     def test_output_not_overwritten(self):
         with tempfile.TemporaryDirectory() as d:
