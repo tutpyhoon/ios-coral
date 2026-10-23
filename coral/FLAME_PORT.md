@@ -145,3 +145,35 @@ is not running on physical Coral**. The Pixel 4 project's public success
 does not establish compatible Coral DPU registers, touch, firmware,
 reserved RAM or file-backed root. No full Coral Android boot image has
 yet been published; no UFS partitions have been touched.
+
+
+## First complete XNU QEMU execution: early panic found and corrected in source
+
+- Host-only full Flame 0124 XNU + our known-good Phase11 16 MiB HFS+ RAM root
+  emulated in [run 39876999404](https://github.com/tutpyhoon/ios-coral/actions/runs/39876999404).
+  The GitHub workflow showed success because diagnostic collection was nonfatal;
+  **the guest actually PANICKED**. No PID1/child markers appeared. Do not
+  count this as a successful userspace boot.
+- The captured framebuffer recorded ESR=0x96000050 (data abort),
+  PC=0xfffffe00075195ac, FAR=0xfffffe46db981000 and kernel VM initialized.
+  Kernel symbols in [run 39877495280](https://github.com/tutpyhoon/ios-coral/actions/runs/39877495280)
+  map PC to `_sweet_log_mirror_start+108`, LR to the same function +28.
+- The pinned upstream `0089-flame-tools-usb.patch` adds an **optional crash
+  log mirror at hardcoded physical address 0x1fe000000** via `ml_io_map_wcomb`.
+  QEMU's low-memory 4 GiB guest doesn't cover that physical address. This
+  pointer access was the first panic, before the synthetic HFS root launched.
+- `coral/port_flame_full_xnu.py` now injects an early return in
+  `sweet_log_mirror_start`, guarded by the literal
+  `CORAL_MIRROR_FENCE`, preserving the normal kernel log ring but not the
+  unsafe optional high-memory rescue mirror. This also avoids assuming
+  Coral's 4 XL memory carveouts match Flame's before boot.
+- [Full corrected XNU CI](https://github.com/tutpyhoon/ios-coral/actions/runs/39877872089)
+  rebuilds **both** the earlier UFS write-fenced source and new mirror fence.
+- [QEMU re-test](https://github.com/tutpyhoon/ios-coral/actions/runs/39878018435)
+  downloads exactly that corrected build once available, mounts the previously
+  validated Phase11 HFS filesystem **in RAM only**, and now refuses to report
+  guest success if any panic is detected.
+
+**Status of corrected build and re-test must be checked before claiming a
+new boot.** The full proprietary iOS root is still only a Mac-local sparse
+disk image and cannot yet be safely launched from Coral storage.
