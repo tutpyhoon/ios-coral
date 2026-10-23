@@ -1,4 +1,4 @@
-name: Coral full Flame XNU QEMU boot smoke (no phone)
+name: Coral full Flame XNU QEMU with Phase11 HFS RAM root (no phone)
 on:
   workflow_dispatch:
   push:
@@ -29,21 +29,26 @@ jobs:
           git -C source checkout -q --detach FETCH_HEAD
           python3 coral/prepare_upstream_flame.py source
           mkdir -p kernel
-          gh run download 39869118799 -R tutpyhoon/ios-coral -n coral-flame-full-xnu0124-UNTESTED --dir kernel
+          gh run download 39876050024 -R tutpyhoon/ios-coral -n coral-flame-full-xnu0124-UNTESTED --dir kernel
           (cd kernel && sha256sum -c SHA256SUMS)
           test -s kernel/kernel.development.sweet
+          mkdir -p hfs
+          gh run download 39712670256 -R tutpyhoon/ios-coral             -n coral-phase11-source-built-hfs-inputs --dir hfs
+          (cd hfs && sha256sum -c SHA256SUMS)
+          test "$(stat -c %s hfs/flame-root.hfs)" = "16777216"
       - name: Build Coral QEMU ADT and full XNU memory payload
         run: |
           python3 source/tools/mkadt.py coral-qemu.adt --qemu
           python3 source/tools/mkpayload.py \
             kernel/kernel.development.sweet coral-qemu.adt coral-qemu.bin \
-            --cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 rd=md0 sweetgpu=0 rootrw=0 ufsrw=0"
+            --cmdline "debug=0xc serial=3 cpus=1 keepsyms=1 rd=md0 sweetgpu=0 rootrw=0 ufsrw=0"             --ramdisk hfs/flame-root.hfs
           python3 - <<'PY'
           from pathlib import Path
           import struct
           b=Path("coral-qemu.bin").read_bytes()
           assert b[:8]==b"SWEETXNU"
           assert struct.unpack_from("<Q",b,0x38)[0]==0xb0000000
+          assert b"RAMDisk" in b and b"CORAL11: child exec succeeded" in Path("hfs/flame-root.hfs").read_bytes()
           print("PASS: validated payload header, low-memory QEMU geometry, no UFS device/root filesystem")
           PY
       - name: Run 35s QEMU, capture unmodified evidence
@@ -68,6 +73,14 @@ jobs:
           assert Path("evidence/qemu.log").is_file()
           assert Path("evidence/serial.txt").is_file()
           assert r.get("status")!="qemu_exited","Full kernel exited QEMU prematurely"
+          if Path("evidence/fb.txt").is_file():
+              text=Path("evidence/fb.txt").read_text()
+              for marker in ("CORAL11: PID1 HFS+ root active",
+                             "CORAL11: child exec succeeded",
+                             "CORAL11: child exited status 0"):
+                  print("Synthetic RAM root marker", repr(marker), marker in text)
+          else:
+              print("No decoded framebuffer yet; guest startup is not confirmed")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
