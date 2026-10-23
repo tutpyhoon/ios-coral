@@ -1,0 +1,33 @@
+name: CORAL one-command Mac installer orchestration guards (no phone)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/one_shot_coral.py'
+      - 'coral/tests/test_one_shot_coral.py'
+      - '.github/workflows/coral-flame-one-shot.yml'
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and run synthetic-only installer tests
+        run: |
+          python3 -m py_compile coral/one_shot_coral.py
+          python3 -m unittest discover -s coral/tests -p 'test_one_shot_coral.py' -v
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('coral/one_shot_coral.py').read_text()
+          assert 'ERASE_CORAL_USERDATA' in s
+          assert 'from deploy_ios_root import install' in s
+          assert 'root_mode' in s
+          assert 'fastboot flash' not in s
+          assert 'fastboot erase' not in s
+          assert 'command(["fastboot","boot",boot])' in s
+          assert 'fresh_folder(output)' in s
+          print('PASS: one-shot Mac installer requires user confirmation and does not write any boot partitions')
+          PY
