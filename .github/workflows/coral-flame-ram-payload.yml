@@ -67,7 +67,7 @@ jobs:
           for marker in (b"rd=md0",b"RAMDisk",b"coralqemu=1",
                          b"sweetgpu=0",b"rootrw=0",b"ufsrw=0"):
               assert marker in payload,marker
-          for marker in (b"google,coral",b"Google Pixel 4 XL"):
+          for marker in (b"google,coral",b"iPhone10,3"):
               assert marker in adt,marker
           assert b"CORAL11: child exec succeeded" in hfs
           assert b"rd=ufsroot0" not in payload
