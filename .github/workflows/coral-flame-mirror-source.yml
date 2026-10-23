@@ -1,0 +1,36 @@
+name: CORAL locate Flame RAM-log mirror source (no phone)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - '.github/workflows/coral-flame-mirror-source.yml'
+permissions:
+  contents: read
+jobs:
+  locate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate full upstream RAM-log mirror implementation
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git 745c4341af86089efb0df851fa8a27fb8face624
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          paths=list(Path("source/xnu/patches").glob("*.patch"))
+          found=[]
+          for path in paths:
+              data=path.read_text(errors="replace")
+              for match in re.finditer(r'sweet_log_mirror_start|log_mirror_start|sweet_log_mirror',data):
+                  pos=match.start()
+                  print("FILE:",path)
+                  print("CONTEXT:",data[max(0,pos-2000):pos+7500])
+                  found.append(str(path))
+          print("FOUND COUNT",len(found))
+          if not found:
+              raise SystemExit("No matching symbol in pinned upstream patch files")
+          PY
