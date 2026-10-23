@@ -20,26 +20,28 @@ jobs:
           sudo apt-get install -y qemu-system-arm llvm
           command -v gh
           command -v llvm-nm
-      - name: Fetch proven compilation artifact and pinned Flame tools
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Fetch pinned upstream Flame tools
         run: |
           git init -q source
           git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git 745c4341af86089efb0df851fa8a27fb8face624
           git -C source checkout -q --detach FETCH_HEAD
           python3 coral/prepare_upstream_flame.py source
-          mkdir -p kernel
-          for i in $(seq 1 24); do
-            if gh run download 39877872089 -R tutpyhoon/ios-coral               -n coral-flame-full-xnu0124-UNTESTED --dir kernel; then
-              break
-            fi
-            if [ "$i" = 24 ]; then echo "sanitized mirror-disabled kernel unavailable"; exit 1; fi
-            sleep 10
-          done
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39877872089
+          name: coral-flame-full-xnu0124-UNTESTED
+          path: kernel
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39712670256
+          name: coral-phase11-source-built-hfs-inputs
+          path: hfs
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate downloaded kernel and HFS root
+        run: |
           (cd kernel && sha256sum -c SHA256SUMS)
           test -s kernel/kernel.development.sweet
-          mkdir -p hfs
-          gh run download 39712670256 -R tutpyhoon/ios-coral             -n coral-phase11-source-built-hfs-inputs --dir hfs
           (cd hfs && sha256sum -c SHA256SUMS)
           test "$(stat -c %s hfs/flame-root.hfs)" = "16777216"
       - name: Build Coral QEMU ADT and full XNU memory payload
