@@ -177,3 +177,31 @@ yet been published; no UFS partitions have been touched.
 **Status of corrected build and re-test must be checked before claiming a
 new boot.** The full proprietary iOS root is still only a Mac-local sparse
 disk image and cannot yet be safely launched from Coral storage.
+
+## 2026-10-22, full XNU QEMU second-panic diagnosis
+
+The original mirror-disabled replay
+[run 39878018435](https://github.com/tutpyhoon/ios-coral/actions/runs/39878018435)
+failed for a CI cross-run `gh run download` artifact permission issue,
+not a kernel test. This was corrected to native `actions/download-artifact@v4`.
+
+The real replay [run 39882803772](https://github.com/tutpyhoon/ios-coral/actions/runs/39882803772)
+successfully bootstrapped the full compiled XNU Mach-O plus a real 16 MiB
+HFS+ RAM disk in generic 4 GiB QEMU. Guest still panicked before PID1.
+[Exact kernel symbolication run 39883039269](https://github.com/tutpyhoon/ios-coral/actions/runs/39883039269)
+located guest PC `0xfffffe000752b59c` at `_sweet_spmi_init+156`
+and LR `0xfffffe000752b580` at `_sweet_spmi_init+128`.
+QEMU logs show **invalid read at guest physical `0x0c440000`**,
+matching upstream `bsd/dev/sweet_spmi.c` `SP_CORE_PA`.
+Unlike real Pixel 4 XL hardware, generic QEMU virt has no Qualcomm SPMI.
+This is an emulator mapping mismatch, NOT a confirmed failure on Coral.
+The console had progressed through device-tree platform expert, trust
+interface, touch registration, static battery fallback, CPU0 ready and
+`FLAME WDT` before the abort.
+
+`coral/port_flame_full_xnu.py` now guards `sweet_spmi_init` via explicit
+`coralqemu=1` boot argument: only the generic QEMU boot skips SPMI; normal
+physical hardware does not. A new full XNU compile was started in
+[run 39883218082](https://github.com/tutpyhoon/ios-coral/actions/runs/39883218082).
+There is **no new physical test image yet**. QEMU must pass with the new
+kernel/boot argument before making an experimental device package.
