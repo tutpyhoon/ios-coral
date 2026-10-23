@@ -119,6 +119,68 @@ def sudo(args,input_data=None):
     return proc
 
 
+def prepare_userspace_dirs(mnt):
+    """Mirror ios-flame mkiosroot logd and mobile-preferences prerequisites.
+
+    Apple logd refuses to use diagnostics and uuidtext directories without
+    the expected numeric _logd UID/GID=272 and .migrated markers. Upstream
+    sweet-root-tweaks.py assumes /private/var/mobile/Library/Preferences
+    exists and can be written by mobile (UID 501). Install only into our
+    mounted NEW image; never modify the source sparseimage.
+    """
+    db=mnt/"private/var/db"
+    diagnostics=db/"diagnostics"
+    uuidtext=db/"uuidtext"
+    timesync=diagnostics/"timesync"
+    for path,mode in ((diagnostics,"0751"),(uuidtext,"0755"),(timesync,"0755")):
+        sudo(["install","-d","-o","272","-g","272","-m",mode,path])
+        sudo(["install","-o","272","-g","272","-m","0644",
+              "/dev/null",path/".migrated"])
+    prefs=mnt/"private/var/mobile/Library/Preferences"
+    sudo(["install","-d","-o","501","-g","501","-m","0755",prefs])
+    return {"logd_dirs":[str(diagnostics),str(uuidtext),str(timesync)],
+            "mobile_prefs":str(prefs)}
+
+
+def verify_userspace_prep(mnt):
+    """Ensure critical permissions and userland startup inputs survived copy."""
+    for rel,mode in (
+        ("private/var/db/diagnostics",0o751),
+        ("private/var/db/uuidtext",0o755),
+        ("private/var/db/diagnostics/timesync",0o755)):
+        p=mnt/rel
+        st=p.stat()
+        if not p.is_dir() or st.st_uid!=272 or st.st_gid!=272 or (st.st_mode&0o777)!=mode:
+            raise RootError("Apple logd directory owner/mode mismatch: "+rel)
+        migration=(p/".migrated").stat()
+        if migration.st_uid!=272 or migration.st_gid!=272 or (migration.st_mode&0o777)!=0o644:
+            raise RootError("Apple logd migration marker owner/mode mismatch: "+rel)
+    bag=mnt/"private/var/keybags/systembag.kb"
+    if not bag.is_file():
+        raise RootError("Missing system keybag required for keybagd")
+    keys=plistlib.loads(bag.read_bytes())
+    if not isinstance(keys,dict) or not isinstance(keys.get("KeyBagKeys"),bytes):
+        raise RootError("Invalid systembag.kb plist")
+    launch=mnt/"System/Library/xpc/launchd.plist"
+    jobs=plistlib.loads(launch.read_bytes()).get("LaunchDaemons",{})
+    if not isinstance(jobs,dict):
+        raise RootError("Invalid Apple launchd service configuration")
+    if any(job.get("Label")=="com.apple.CommCenter" for job in jobs.values()
+           if isinstance(job,dict)):
+        raise RootError("Upstream commcenter crash-loop mitigation did not apply")
+    prefs=mnt/"private/var/mobile/Library/Preferences"
+    required={
+        "com.apple.springboard.plist":"BKNoWatchdogs",
+        "com.apple.purplebuddy.plist":"SetupDone",
+        "com.apple.migration.plist":"LastSystemVersion"}
+    for filename,key in required.items():
+        f=prefs/filename
+        if not f.is_file() or key not in plistlib.loads(f.read_bytes()):
+            raise RootError("Upstream userland preference tweak missing: "+filename)
+    return {"logd_migration_markers":3,"commcenter_excluded":True,
+            "keybag_present":True,"required_preferences":list(required)}
+
+
 def seed_keybag(mnt):
     path=mnt/"private/var/keybags/systembag.kb"
     if path.exists():
@@ -152,6 +214,7 @@ def execute(source,tweaks,output):
             existing=audit_root(mnt)
             if not existing.get("structurally_complete"):
                 raise RootError("Original HFS candidate lacks real binaries/cache: "+repr(existing.get("missing_critical")))
+            prepare_userspace_dirs(mnt)
             result=subprocess.run(["sudo",sys.executable,str(tweaks.expanduser().resolve()),
                                    str(mnt)],check=False)
             if result.returncode:
@@ -160,6 +223,7 @@ def execute(source,tweaks,output):
             after=audit_root(mnt)
             if not after.get("structurally_complete"):
                 raise RootError("Final root audit failed: "+repr(after.get("missing_critical")))
+            userland=verify_userspace_prep(mnt)
             if not (mnt/"System/Library/xpc/launchd.plist").is_file():
                 raise RootError("Missing real Apple launchd service cache")
             print("PASS: real iOS system binaries, 44-part cache and local tweaks")
