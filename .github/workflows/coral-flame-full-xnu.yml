@@ -96,6 +96,19 @@ jobs:
           grep -q '#define SWEET_EARLY_FB_HEIGHT     3040' dxb/xnu/pexpert/pexpert/arm64/SWEET.h
           grep -q '#define SWEET_FB_GPU_ROWBYTES           5760' dxb/xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
           grep -q '#define A6_FB_SIZE' dxb/xnu/bsd/dev/sweet_a6xx.h
+          grep -q 'CORAL_MEDIA_WRITE_FENCE' dxb/xnu/bsd/dev/sweet_ufs.c
+          grep -q 'su.writable = false;' dxb/xnu/bsd/dev/sweet_ufs.c
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("dxb/xnu/bsd/dev/sweet_ufs.c").read_text()
+          assert p.count("CORAL_MEDIA_WRITE_FENCE")>=3
+          submit=p.split("ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)",1)[1]
+          assert "if (write ||" in submit[:420]
+          helper=p.split("ufs_write_blocks(uint64_t lba, uint32_t count)",1)[1]
+          assert "return EROFS;" in helper[:200]
+          assert "su.writable = false;" in p
+          print("PASS: all 3 CORAL write fences built into kernel source")
+          PY
           echo "PASS: full upstream XNU compilation and Coral geometry source present"
       - name: Stage compilation-only kernel
         run: |
@@ -104,6 +117,7 @@ jobs:
           (cd coral-flame-0124-kernel && shasum -a 256 kernel.development.sweet > SHA256SUMS)
           cat > coral-flame-0124-kernel/README.txt <<'EOF'
           EXPERIMENTAL: raw XNU Mach-O, NOT an Android boot.img and NOT tested on Coral.
+          CORAL overlay fences all UFS SCSI write operations and ignores ufsrw=1.
           Full Flame XNU kernel with Coral native framebuffer geometry source changes.
           The original Flame GPU DPU/panel registers and RAM carveouts need validation
           on Pixel 4 XL before any temporary hardware boot.
