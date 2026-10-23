@@ -205,3 +205,9 @@ physical hardware does not. A new full XNU compile was started in
 [run 39883218082](https://github.com/tutpyhoon/ios-coral/actions/runs/39883218082).
 There is **no new physical test image yet**. QEMU must pass with the new
 kernel/boot argument before making an experimental device package.
+
+## Full Flame XNU + Phase11 RAM HFS QEMU PASS and payload preflight
+
+2026-10-22: [Run 39883218082](https://github.com/tutpyhoon/ios-coral/actions/runs/39883218082) rebuilt the complete Coral-adapted full Flame XNU, with Qualcomm SPMI MMIO skipped only when explicit emulator boot arg `coralqemu=1` is supplied. Host kernel compilation passed. [QEMU run 39883467416](https://github.com/tutpyhoon/ios-coral/actions/runs/39883467416) **PASSED**: no panic for the 35-second window, HFS root `md0` mounted, simulated PID1 activated, child fork/exec succeeded, child exit 0, parent alive. This is the real full Flame kernel running source-built *test* binaries in a generic 4 GiB emulator; no Apple launchd, dyld, SpringBoard or actual Adreno acceleration was tested. Nothing was booted on the physical Pixel 4 XL.
+
+[Run 39886614921](https://github.com/tutpyhoon/ios-coral/actions/runs/39886614921) **PASSED** an offline, host-only source-and-binary payload preflight combining the exact QEMU-proven full XNU kernel, 16 MiB source-built HFS+ RAM root, and Coral-identified QEMU ADT. The `coral-flame-ram-payload.yml` artifact is deliberately **manifest and README only**; it does NOT publish a physical Android boot.img, does NOT validate phone memory carveouts, and does not deploy anything to device. Critical next gates: verify the true stock Coral boot DTB and panel revision, physical handoff/addresses and boot shim; use a temporary `fastboot boot` for the first device attempt only after those checks. Never flash this QEMU-compatible payload; its `coralqemu=1` and generic emulator memory assumptions aren't a hardware profile.
