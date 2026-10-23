@@ -31,6 +31,12 @@ CMDLINE=(
     "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress "
     "rd=md0 rootrw=0 ufsrw=0 sweetgpu=0 wdt=-1"
 )
+UFS_CMDLINE=(
+    "debug=0xc serial=3 cpus=1 keepsyms=1 -enable_kprintf_spam -noprogress "
+    "rd=ufsroot0 ufsroot=userdata ufsrw=1 rootrw=1 sweetgpu=0 "
+    "unentitled_ios_sim_launch=1 ignition_level=1 launchd_unsecure_cache=1 "
+    "wdt_test=no_user_checkin wdt=-1"
+)
 SOURCES="start.S shim.c console.c log.c util.c mmu.c fdt.c loader.c ufs.c spmi.c sde.c showlog.c diag.c disptest.c gpuprobe.c gpufw.S smmuprobe.c ramlog.c".split()
 
 
@@ -85,7 +91,9 @@ def patch_adt(path, tools_dir):
             "fb_stride":FB[3]}
 
 
-def build(source,tools_dir,kernel,ramroot,reference,out):
+def build(source,tools_dir,kernel,ramroot,reference,out,root_mode="ram"):
+    if root_mode not in ("ram","ufs"):
+        raise ValueError("Only RAM test or physical UFS root modes are available")
     source=source.expanduser().resolve(strict=True)
     tools_dir=tools_dir.expanduser().resolve(strict=True)
     out=out.expanduser().absolute()
@@ -127,14 +135,27 @@ def build(source,tools_dir,kernel,ramroot,reference,out):
     payload_path=build_dir/"coral-full-xnu-hfs.payload"
     run([sys.executable,source/"tools/mkadt.py",adt_path,"--highmem"])
     ram=patch_adt(adt_path,source/"tools")
-    run([sys.executable,source/"tools/mkpayload.py",kernel,adt_path,payload_path,
-         "--cmdline",CMDLINE,"--ramdisk",ramroot])
+    payload_args=[sys.executable,source/"tools/mkpayload.py",kernel,
+                  adt_path,payload_path,"--cmdline",
+                  CMDLINE if root_mode=="ram" else UFS_CMDLINE]
+    if root_mode=="ram":
+        payload_args.extend(["--ramdisk",ramroot])
+    run(payload_args)
     payload=payload_path.read_bytes()
     assert payload[:8]==b"SWEETXNU"
-    if any(x in payload for x in (b"coralqemu=1",b"rd=ufsroot0",b"ufsrw=1",b"rootrw=1")):
-        raise ValueError("Unsafe/emulator boot arguments in physical payload")
-    if not all(x in payload for x in (b"rd=md0",b"ufsrw=0",b"sweetgpu=0",b"rootrw=0")):
-        raise ValueError("Missing read-only RAM-root boot arguments")
+    if b"coralqemu=1" in payload:
+        raise ValueError("Physical package must not contain the emulator-only boot argument")
+    if root_mode=="ram":
+        if any(x in payload for x in (b"rd=ufsroot0",b"ufsrw=1",b"rootrw=1")):
+            raise ValueError("Unsafe UFS activation in RAM-root test")
+        required=(b"rd=md0",b"ufsrw=0",b"rootrw=0",b"sweetgpu=0")
+    else:
+        if b"rd=md0" in payload or b"RAMDisk" in payload:
+            raise ValueError("UFS-root build unexpectedly contains a RAM root")
+        required=(b"rd=ufsroot0",b"ufsroot=userdata",b"ufsrw=1",
+                  b"rootrw=1",b"ignition_level=1",b"sweetgpu=0")
+    if not all(x in payload for x in required):
+        raise ValueError("Missing boot arguments for selected root mode")
     if struct.unpack_from("<Q",payload,0x38)[0]!=PHYS_BASE:
         raise ValueError("Payload physical target incorrect")
     # Compile fresh safe Coral shim source. This is a host build only.
@@ -195,10 +216,15 @@ def build(source,tools_dir,kernel,ramroot,reference,out):
         "never_flash_or_erase":True,
         "ios_springboard":False,
         "apple_launchd":False,
-        "root":"source-built Phase11 16MiB HFS+ RAM only",
+        "root":("source-built Phase11 16MiB HFS+ RAM only" if root_mode=="ram" else
+                "UFS partition named userdata: REAL iPhone X OS from private flashed HFS+ root"),
+        "root_mode":root_mode,
+        "ufs_media_write_commands_enabled":root_mode=="ufs",
+        "tested_with_apple_launchd":False,
+        "userdata_must_be_installed_first":root_mode=="ufs",
         "ram":ram,
         "kernel_sha256":sha(kernel.read_bytes()),
-        "hfs_sha256":sha(ramroot.read_bytes()),
+        "hfs_sha256":sha(ramroot.read_bytes()) if root_mode=="ram" else None,
         "boot_sha256":sha(image),
         "boot_img":out.name,
         "dtb_sha256":sha(dtb2),
@@ -216,9 +242,10 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for name in ("source","tools","kernel","ramroot","reference_boot","output"):
         p.add_argument("--"+name.replace("_","-"),type=Path,required=True)
+    p.add_argument("--root-mode",choices=("ram","ufs"),default="ram")
     args=p.parse_args()
     build(args.source,args.tools,args.kernel,args.ramroot,
-          args.reference_boot,args.output)
+          args.reference_boot,args.output,args.root_mode)
 
 if __name__=="__main__":
     main()
