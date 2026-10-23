@@ -19,9 +19,24 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y clang lld llvm lz4 python3 python3-cryptography
+      - name: Wait for the matching UFS-diagnostic XNU kernel build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 90); do
+            status=$(gh api repos/tutpyhoon/ios-coral/actions/runs/39891582692 --jq '.status+" "+(.conclusion // "pending")')
+            echo "Full diagnostic XNU compile: $status"
+            if [ "$status" = "completed success" ]; then break; fi
+            if echo "$status" | grep -q '^completed '; then
+              echo "STOP: prerequisite diagnostic kernel compilation failed"
+              exit 1
+            fi
+            if [ "$i" = 90 ]; then echo "STOP: prerequisite kernel compile timeout"; exit 1; fi
+            sleep 12
+          done
       - uses: actions/download-artifact@v4
         with:
-          run-id: 39883218082
+          run-id: 39891582692
           name: coral-flame-full-xnu0124-UNTESTED
           path: full-kernel
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -100,7 +115,7 @@ jobs:
             (cd coral-full-candidate && sha256sum coral-full-flame-RAM-UNTESTED.img)
             exit 1
           }
-      - name: Also prepare the REAL iOS 16 UFS-root boot candidate (NOT physically tested)
+      - name: Prepare read-only UFS-root boot candidate (NOT physically tested)
         run: |
           python3 coral/build_flame_device12.py \
             --source source \
@@ -110,7 +125,7 @@ jobs:
             --reference-boot known-boot/coral-phase11-child-exec-UNTESTED.img \
             --root-mode ufs \
             --output coral-full-candidate/coral-full-flame-UFS-UNTESTED.img
-      - name: Verify UFS root is distinct, writable and dependent on phone installation
+      - name: Verify read-only UFS root is distinct and dependent on phone installation
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -119,13 +134,59 @@ jobs:
           j=json.loads(p.read_text())
           assert j["root_mode"]=="ufs"
           assert j["userdata_must_be_installed_first"]
-          assert j["ufs_media_write_commands_enabled"]
+          assert j["ufs_media_write_commands_enabled"] is False
+          assert j["kernel_has_three_ufs_write_fences"] is True
           assert j["apple_launchd"] is False and j["tested_with_apple_launchd"] is False
           assert j["dtb_sha256"]=="f582348d19807e8f4681e6c226c9947ef64a380ef1c85c487458f7bf085b89da"
           assert j["never_flash_or_erase"] and j["only_fastboot_boot_supported"]
           assert Path("coral-full-candidate/coral-full-flame-UFS-UNTESTED.img").stat().st_size==67108864
           print("PASS: separate full iOS userdata root candidate built, untested, no phone touched")
           PY
+      - name: Build standalone XNU UFS GPT diagnostic with RAM-root PID1 (NO userdata replacement)
+        run: |
+          python3 coral/build_flame_device12.py \
+            --source source \
+            --tools input-tools \
+            --kernel full-kernel/kernel.development.sweet \
+            --ramroot hfs/flame-root.hfs \
+            --reference-boot known-boot/coral-phase11-child-exec-UNTESTED.img \
+            --root-mode ufsdiag \
+            --output coral-full-candidate/coral-full-flame-UFS-GPT-DIAG-UNTESTED.img
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path("coral-full-candidate/coral-full-flame-UFS-GPT-DIAG-UNTESTED-engineering/manifest.json").read_text())
+          assert m["root_mode"]=="ufsdiag" and m["coralufsdiag"] is True
+          assert m["ufs_media_write_commands_enabled"] is False
+          assert m["hfs_sha256"] and not m["userdata_must_be_installed_first"]
+          assert m["dtb_sha256"]=="f582348d19807e8f4681e6c226c9947ef64a380ef1c85c487458f7bf085b89da"
+          kernel=Path("full-kernel/kernel.development.sweet").read_bytes()
+          assert b"CORAL UFS DIAG: GPT userdata" in kernel, "wrong older kernel; no read-only diagnostic"
+          print("PASS: opt-in read-only XNU GPT probe, root stays source-built md0")
+          PY
+      - name: Stage separate temporary XNU GPT probe artifact
+        run: |
+          mkdir -p coral-ufs-diag
+          cp coral-full-candidate/coral-full-flame-UFS-GPT-DIAG-UNTESTED.img coral-ufs-diag/
+          cp coral-full-candidate/coral-full-flame-UFS-GPT-DIAG-UNTESTED-engineering/manifest.json coral-ufs-diag/manifest.json
+          cat > coral-ufs-diag/README.txt <<'EOF'
+          EXPERIMENTAL FULL XNU KERNEL UFS-GPT READ-ONLY DIAGNOSTIC, PIXEL 4 XL
+          rd=md0, rootrw=0, ufsrw=0, coralufsdiag=1, sweetgpu=0.
+          Initializes the FULL upstream XNU UFS driver and reads physical GPT,
+          logs 'CORAL UFS DIAG: GPT userdata FOUND rc=0' if it succeeds,
+          then proceeds with the source-built 16MiB HFS+ RAM root.
+          NO userdata replacement required. NO SCSI write command can be submitted.
+          It DOES program host-controller registers and requests DMA, and may hang or
+          destabilize the phone. ONLY temporary fastboot boot. NEVER flash.
+          This is not SpringBoard and is NOT hardware tested.
+          EOF
+          (cd coral-ufs-diag && sha256sum coral-full-flame-UFS-GPT-DIAG-UNTESTED.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-full-flame-UFS-GPT-DIAG-UNTESTED
+          path: coral-ufs-diag/
+          retention-days: 14
+          if-no-files-found: error
       - name: Package this experimental image only, not firmware or phone-partition tool
         run: |
           cp coral-full-candidate/coral-full-flame-RAM-UNTESTED-engineering/manifest.json coral-full-candidate/manifest.json
@@ -149,9 +210,10 @@ jobs:
           cp coral-full-candidate/coral-full-flame-UFS-UNTESTED-engineering/manifest.json coral-ufs-boot/manifest.json
           cat > coral-ufs-boot/README.txt <<'EOF'
           PIXEL 4 XL EXPERIMENTAL REAL iOS 16 USERDATA ROOT BOOT — NOT HARDWARE TESTED.
-          NOT a current iOS home-screen success. The device-specific UFS write code is ENABLED
-          with rd=ufsroot0 rootrw=1 ufsrw=1. Only mount after user explicitly prepares
-          their own verified raw HFS+ userdata partition and backs up IMEI calibration data.
+          NOT a current iOS home-screen success. The UFS write path is HARD-FENCED
+          in the compiled XNU regardless of boot arguments (rootrw=0, ufsrw=0).
+          Only use after the real iOS HFS+ userdata partition has been installed
+          with explicit permission and backups. Apple launchd may require root writes.
           Early framebuffer/GPU full iOS 16 path remains unverified on Coral.
           There are NO Apple system files in this image; those live on the private HFS+ root.
           NEVER fastboot flash any boot partitions; fastboot boot only for deliberate tests.
