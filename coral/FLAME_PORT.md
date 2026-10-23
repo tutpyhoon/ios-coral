@@ -107,3 +107,41 @@ Do **not** run the upstream Flame `flame-run.sh`, `dd of=/dev/block/sda15`, TWRP
 - ADT adaptation preflight passed in run `39866922004` but the **full boot chain has not been tested**. Both artifacts are downloaded from GitHub Actions, not auto-deployed onto the owner's phone.
 - No real Apple `launchd`, SpringBoard or Turnip renderer has executed on `coral` in these build jobs. The author's actual GPU success remains demonstrated on the smaller `flame`, not this 4 XL.
 - Next: combine the verified Coral shim, the raw kernel, a read-only RAM root and stock Coral DTB into an isolated **temporary boot** test; first validate XNU start, memory carveouts and panel while deliberately NOT enabling Flame UFS userdata writes or GPU register programming. Do not flash.
+
+
+## 2026-10-22/23 follow-through: first FULL Coral XNU + storage write fences COMPILED
+
+- **Full upstream XNU 0124 with Coral 1440×3040/5760 panel constants and
+  18 MiB GPU framebuffer mapping:** GitHub compilation **PASS**,
+  [run 39869118799](https://github.com/tutpyhoon/ios-coral/actions/runs/39869118799).
+- **Follow-up compile with three independent UFS write barriers:**
+  **PASS**, [run 39876050024](https://github.com/tutpyhoon/ios-coral/actions/runs/39876050024).
+  The raw kernel Mach-O `kernel.development.sweet` was compiled.
+  Source `coral/port_flame_full_xnu.py` blocks write-direction SCSI command
+  submission, returns EROFS from WRITE(10), and overrides `su.writable` to
+  false despite any `ufsrw=1` boot arg. GitHub verified all three
+  fences in patched source. This is a **temporary testing build only**.
+- **Coral boot shim ELF** built at
+  [run 39869658682](https://github.com/tutpyhoon/ios-coral/actions/runs/39869658682).
+  The normal path disables upstream Flame's scratch/rescue UFS writes
+  and its DPU autorefresh register sequence, and uses Coral FB dimensions.
+  It remains an ELF, not a flashable image.
+- **Previously hardware-proven Phase11 boot image v2 header/FDT audit:**
+  [run 39876765794](https://github.com/tutpyhoon/ios-coral/actions/runs/39876765794)
+  PASS. Header version 2, 4096-byte pages, `dtb_addr=0x1f00000`,
+  embedded DTB 1,048,284 bytes, first FDT length 525,221 bytes, SHA256
+  `f582348d19807e8f4681e6c226c9947ef64a380ef1c85c487458f7bf085b89da`.
+  **This does not verify the actual DTB's selected Coral panel revision**.
+- **QEMU synthetic memory-only start**:
+  [run 39876331421](https://github.com/tutpyhoon/ios-coral/actions/runs/39876331421)
+  uses the first full kernel, and
+  [run 39876999404](https://github.com/tutpyhoon/ios-coral/actions/runs/39876999404)
+  uses the write-fenced full kernel plus the previously tested 16 MiB HFS
+  RAM root with two static user processes. These are **host-only**, and
+  results must be checked before claiming any new boot success.
+
+**Important:** the full XNU/GPU source is now compiling, but **SpringBoard
+is not running on physical Coral**. The Pixel 4 project's public success
+does not establish compatible Coral DPU registers, touch, firmware,
+reserved RAM or file-backed root. No full Coral Android boot image has
+yet been published; no UFS partitions have been touched.
