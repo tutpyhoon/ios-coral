@@ -1,0 +1,45 @@
+name: CORAL full XNU QEMU panic symbolication (no phone)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/symbolicate_macho.py'
+      - '.github/workflows/coral-flame-symbolicate.yml'
+permissions:
+  actions: read
+  contents: read
+jobs:
+  locate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download exact sanitized full kernel that caused the panic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p kernel
+          gh run download 39876050024 -R tutpyhoon/ios-coral \
+            -n coral-flame-full-xnu0124-UNTESTED --dir kernel
+          (cd kernel && sha256sum -c SHA256SUMS)
+      - name: Resolve the PC, LR and panic caller into XNU source symbols
+        run: |
+          python3 coral/symbolicate_macho.py kernel/kernel.development.sweet \
+            0xfffffe00075195ac 0xfffffe000751955c \
+            0xfffffe0007b64c0c 0xfffffe0007ce6718 > panic-symbols.json
+          cat panic-symbols.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path("panic-symbols.json").read_text())
+          assert r["symbols"]>1000, "kernel is stripped/unusable"
+          assert r["hits"][0].get("symbol") is not None
+          print("PASS: resolved QEMU PC and LR to full upstream Flame kernel symbol table")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-flame-qemu-symbols
+          path: panic-symbols.json
+          retention-days: 14
+          if-no-files-found: error
