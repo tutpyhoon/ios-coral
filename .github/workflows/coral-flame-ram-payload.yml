@@ -1,0 +1,104 @@
+name: CORAL full Flame XNU RAM-only device-payload preflight (NO boot.img)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - '.github/workflows/coral-flame-ram-payload.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  payload:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39883218082
+          name: coral-flame-full-xnu0124-UNTESTED
+          path: kernel
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39712670256
+          name: coral-phase11-source-built-hfs-inputs
+          path: root
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify exactly QEMU-proven kernel and source-built HFS root
+        run: |
+          (cd kernel && sha256sum -c SHA256SUMS)
+          (cd root && sha256sum -c SHA256SUMS)
+          test "$(stat -c %s root/flame-root.hfs)" = 16777216
+          python3 - <<'PY'
+          from pathlib import Path
+          x=Path("root/flame-root.hfs").read_bytes()
+          for m in (b"CORAL11: PID1 HFS+ root active",
+                    b"CORAL11: child exec succeeded",
+                    b"CORAL11: child exited status 0"):
+              assert m in x
+          print("PASS: unchanged Phase11 RAM filesystem and two custom processes")
+          PY
+      - name: Fetch pinned former working Coral hardware-payload toolkit
+        run: |
+          git init -q tools
+          git -C tools fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git b91463ab1ef083f81f6c3393593385aa996ceaf0
+          git -C tools checkout -q --detach FETCH_HEAD
+          python3 coral/stage05.py prepare tools
+          python3 tools/flame/fetch.py
+      - name: Assemble full XNU plus HFS in a RAM-only Coral engineering payload
+        run: |
+          mkdir -p input
+          cp kernel/kernel.development.sweet root/flame-root.hfs root/flame-fs-init input/
+          cd tools
+          python3 flame/pack_kernel.py ../input --hfs-root
+      - name: Verify device, memory boundaries, read-only storage policy
+        run: |
+          python3 - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          manifest=json.loads(Path("tools/flame/out/flame-early-manifest.json").read_text())
+          payload=Path("tools/flame/out/flame-early.payload").read_bytes()
+          src=Path("kernel/kernel.development.sweet").read_bytes()
+          hfs=Path("root/flame-root.hfs").read_bytes()
+          assert manifest["kernel_sha256"]==hashlib.sha256(src).hexdigest()
+          assert manifest["ram_root_sha256"]==hashlib.sha256(hfs).hexdigest()
+          assert manifest["payload_sha256"]==hashlib.sha256(payload).hexdigest()
+          assert manifest["hfs_root"] is True
+          assert b"google,coral" in payload
+          assert b"Google Pixel 4 XL" in payload
+          assert b"rd=md0" in payload
+          assert b"RAMDisk" in payload
+          assert b"CORAL11: child exec succeeded" in hfs
+          assert b"ufsrw=1" not in payload
+          assert b"rd=ufsroot0" not in payload
+          out=Path("coral-full-flame-ram-preflight")
+          out.mkdir()
+          (out/"manifest.json").write_text(json.dumps({
+              "qemu_run":39883467416,
+              "kernel_build_run":39883218082,
+              "full_flame_xnu_sha256":hashlib.sha256(src).hexdigest(),
+              "hfs_sha256":hashlib.sha256(hfs).hexdigest(),
+              "payload_sha256":hashlib.sha256(payload).hexdigest(),
+              "payload_size":len(payload),
+              "device":"coral",
+              "root":"16MiB HFS RAM only; synthetic PID1 not Apple launchd",
+              "phone_tested":False,
+              "flashable":False,
+              "hardware_carveouts_validated":False,
+              "status":"PREFLIGHT ONLY; physical boot image intentionally not generated"
+          },indent=2)+"\n")
+          (out/"README.txt").write_text(
+              "CORAL FULL XNU PHASE: HOST-ONLY RAM ROOT PAYLOAD PRECHECK\n"
+              "NO BOOT.IMG PRODUCED. NO APPLE USERLAND. NO INTERNAL STORAGE.\n"
+              "A raw payload is not suitable for fastboot boot or fastboot flash.\n"
+              "The high-RAM and Coral stock-DTB physical handoff remain unverified.\n")
+          print("PASS: full Flame XNU + source-built HFS RAM payload assembled and checked; no phone access")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-full-flame-ram-payload-PREFLIGHT-ONLY
+          path: coral-full-flame-ram-preflight/
+          retention-days: 14
+          if-no-files-found: error
