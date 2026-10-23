@@ -1,0 +1,47 @@
+name: CORAL QEMU panic analysis from captured evidence (host only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - ".github/workflows/coral-flame-qemu-analyze.yml"
+permissions:
+  actions: read
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch exact sanitized XNU + Phase11 HFS QEMU snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p evidence
+          gh run download 39876999404 -R tutpyhoon/ios-coral \
+            -n coral-flame-full-qemu-diagnostics --dir evidence
+      - name: Print exact visible QEMU panic and register state
+        run: |
+          python3 - <<'PY'
+          import json,re
+          from pathlib import Path
+          root=Path("evidence")
+          result=json.loads((root/"result.json").read_text())
+          print("RESULT:",result)
+          s=(root/"fb.txt").read_text(errors="replace") if (root/"fb.txt").exists() else ""
+          for i,line in enumerate(s.splitlines()):
+              if line.strip():
+                  print(f"FB[{i:03d}] {line}")
+          print("=== REGISTERS (first/last) ===")
+          r=(root/"regs.txt").read_text(errors="replace") if (root/"regs.txt").exists() else ""
+          print(r[:5000], "\n...\n",r[-2500:])
+          print("=== QEMU EXCEPTION HINTS ===")
+          q=(root/"qemu.log").read_text(errors="replace") if (root/"qemu.log").exists() else ""
+          print(q[-4500:])
+          print("=== SYNTHETIC USERSPACE ===")
+          print("pid1:", "CORAL11: PID1 HFS+ root active" in s)
+          print("child:", "CORAL11: child exec succeeded" in s)
+          if result.get("status") == "panic":
+              print("EXPECTED DIAGNOSTIC: QEMU PANIC; no boot success claimed.")
+          PY
