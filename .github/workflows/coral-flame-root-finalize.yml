@@ -1,0 +1,63 @@
+name: CORAL offline complete iOS root exporter integrity checks
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - "coral/finalize_ios_root.py"
+      - "coral/tests/test_finalize_ios_root.py"
+      - ".github/workflows/coral-flame-root-finalize.yml"
+permissions:
+  contents: read
+jobs:
+  pure_python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 -m py_compile coral/finalize_ios_root.py
+          python3 -m unittest discover -s coral/tests -p "test_finalize_ios_root.py" -v
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          t=Path("coral/finalize_ios_root.py").read_text()
+          ast.parse(t)
+          assert "from audit_hfs_candidate12 import validate" in t
+          assert "from build_ios_hfs_candidate import mounted" in t
+          assert "fastboot boot" not in t
+          assert "adb shell" not in t
+          assert "subprocess.run([\"sudo\",\"-v\"]" in t
+          print("PASS: host-only original-sparse-preserving finalization guards")
+          PY
+
+  native_macos:
+    needs: pure_python
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create synthetic HFS+ sparse source, convert UDRW, validate exact raw size
+        run: |
+          python3 - <<'PY'
+          import subprocess,tempfile,sys
+          from pathlib import Path
+          sys.path.insert(0,'coral')
+          from finalize_ios_root import check_hfs_bytes
+          with tempfile.TemporaryDirectory(prefix="coral-native-udrw-") as d:
+              root=Path(d)
+              inp=root/"synthetic.sparseimage"
+              out=root/"synthetic.dmg"
+              subprocess.run(["hdiutil","create","-type","SPARSE","-size","128m",
+                              "-fs","Case-sensitive Journaled HFS+",
+                              "-volname","CoralSynthetic",str(inp)],check=True)
+              subprocess.run(["hdiutil","convert",str(inp),"-format","UDRW",
+                              "-o",str(out)],check=True)
+              assert inp.exists() and out.exists()
+              raw=check_hfs_bytes(out)
+              print("Observed macOS UDRW raw header:",raw)
+              assert raw["signature"] in ("H+","HX")
+              assert raw["raw_bytes"]>=128*1024*1024-4096
+              assert raw["udif_trailer_bytes"] in (0,512)
+              print("PASS: real macOS HFS+ create/UDRW convert/verified filesystem blocks")
+          PY
