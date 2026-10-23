@@ -1,0 +1,75 @@
+name: CORAL diagnose current full XNU QEMU panic (no phone)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - '.github/workflows/coral-flame-qemu-current.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: coral-flame-full-qemu-diagnostics
+          run-id: 39882803772
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: evidence
+      - uses: actions/download-artifact@v4
+        with:
+          name: coral-flame-full-xnu0124-UNTESTED
+          run-id: 39877872089
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: kernel
+      - name: Print full framebuffer panic and exact ARM64 symbols
+        run: |
+          (cd kernel && sha256sum -c SHA256SUMS)
+          python3 - <<'PY'
+          import json, sys, re
+          from pathlib import Path
+          sys.path.insert(0,'coral')
+          from symbolicate_macho import symbols,nearest
+          p=Path("evidence")
+          r=json.loads((p/"result.json").read_text())
+          fb=(p/"fb.txt").read_text(errors="replace")
+          regs=(p/"regs.txt").read_text(errors="replace") if (p/"regs.txt").exists() else ""
+          qemu=(p/"qemu.log").read_text(errors="replace") if (p/"qemu.log").exists() else ""
+          print("RESULT:",r)
+          print("=== PHYSICAL CONSOLE CAPTURE (nonempty lines) ===")
+          for i,line in enumerate(fb.splitlines()):
+              if line.strip(): print(f"FB[{i:03d}] {line}")
+          print("=== GUEST REGISTERS ===\n",regs[:3300])
+          print("=== QEMU MMIO EXCEPTIONS ===\n",qemu[-3300:])
+          # Parse kernel panic register strings from both unwrapped framebuffer
+          # rows and concatenated glyph lines (some console rows wrap).
+          words=re.findall(r"0xfffffe[0-9a-fA-F]{9,11}",fb)
+          values=[]
+          for v in words:
+              n=int(v,16)
+              if n not in values and 0xfffffe0000000000<=n<0xfffffe0010000000:
+                  values.append(n)
+          sym=symbols("kernel/kernel.development.sweet")
+          print("SYMBOL_COUNT",len(sym))
+          hits=[nearest(sym,n) for n in values[:60]]
+          for hit in hits: print("SYMBOL",hit)
+          (p/"symbolications.json").write_text(json.dumps({
+              "result":r,"addresses":hits,
+              "kernel":"39877872089:coral-flame-full-xnu0124-UNTESTED",
+              "qemu":"39882803772:coral-flame-full-qemu-diagnostics",
+          },indent=2)+"\n")
+          assert r.get("status")=="panic", "No panic was found; inspect different failure"
+          assert hits, "No kernel pointers decoded; need direct framebuffer inspection"
+          print("PASS: new full XNU panic captured, source symbol references located")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coral-current-qemu-panic-symbols
+          path: evidence/symbolications.json
+          retention-days: 14
+          if-no-files-found: warn
