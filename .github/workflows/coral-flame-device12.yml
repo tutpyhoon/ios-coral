@@ -1,0 +1,126 @@
+name: CORAL full Flame XNU physical RAM boot candidate (TEMPORARY ONLY)
+on:
+  workflow_dispatch:
+  push:
+    branches: [coral-flame-port]
+    paths:
+      - 'coral/build_flame_device12.py'
+      - '.github/workflows/coral-flame-device12.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  boot_package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AArch64 cross-build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clang lld llvm lz4 python3 python3-cryptography
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39883218082
+          name: coral-flame-full-xnu0124-UNTESTED
+          path: full-kernel
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39712670256
+          name: coral-phase11-source-built-hfs-inputs
+          path: hfs
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 39712670256
+          name: coral-phase11-child-exec-UNTESTED
+          path: known-boot
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check exact boot-source and root checksums
+        run: |
+          (cd full-kernel && sha256sum -c SHA256SUMS)
+          (cd hfs && sha256sum -c SHA256SUMS)
+          (cd known-boot && sha256sum -c SHA256SUMS)
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          expected="3eba87e4b4a946f8a716bda809c7540759a53943130ae52069933a41b57cacd4"
+          b=Path("known-boot/coral-phase11-child-exec-UNTESTED.img").read_bytes()
+          assert hashlib.sha256(b).hexdigest()==expected
+          assert len(b)==67108864
+          print("PASS: boot container exactly matches photographed Phase 11 physical pass")
+          PY
+      - name: Fetch exact full Flame source and adapt only CORAL shim + ADT
+        run: |
+          git init -q source
+          git -C source fetch -q --depth 1 https://github.com/NWylynko/ios-flame.git 745c4341af86089efb0df851fa8a27fb8face624
+          git -C source checkout -q --detach FETCH_HEAD
+          python3 coral/prepare_upstream_flame.py source
+          python3 coral/port_flame_shim.py source
+      - name: Fetch pinned AOSP boot tools, NOT Google/Apple private device files
+        run: |
+          git init -q input-tools
+          git -C input-tools fetch -q --depth 1 https://github.com/dimasmds/ios-flame.git b91463ab1ef083f81f6c3393593385aa996ceaf0
+          git -C input-tools checkout -q --detach FETCH_HEAD
+          python3 input-tools/flame/fetch.py
+          mkdir -p input-tools/downloads/mkbootimg input-tools/downloads/avb
+          cp input-tools/research/flame-sources/mkbootimg.py input-tools/downloads/mkbootimg/mkbootimg.py
+          cp input-tools/research/flame-sources/avbtool.py input-tools/downloads/avb/avbtool.py
+      - name: Package AArch64 Coral full XNU with source-built RAM root
+        run: |
+          mkdir -p coral-full-candidate
+          python3 coral/build_flame_device12.py \
+            --source source \
+            --tools input-tools \
+            --kernel full-kernel/kernel.development.sweet \
+            --ramroot hfs/flame-root.hfs \
+            --reference-boot known-boot/coral-phase11-child-exec-UNTESTED.img \
+            --output coral-full-candidate/coral-full-flame-RAM-UNTESTED.img
+      - name: Audit exact Android boot header, unchanged DTB, and storage-free kernel
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          j=json.loads(Path("coral-full-candidate/coral-full-flame-RAM-UNTESTED-engineering/manifest.json").read_text())
+          assert j["only_fastboot_boot_supported"] is True
+          assert j["never_flash_or_erase"] is True
+          assert j["ios_springboard"] is False
+          assert j["apple_launchd"] is False
+          assert j["hfs_sha256"]
+          assert j["dtb_sha256"]=="f582348d19807e8f4681e6c226c9947ef64a380ef1c85c487458f7bf085b89da"
+          assert j["ram"]=={"dram_base":"0x100000000","dram_size":"0x40000000",
+                              "fb_phys":"0x9c400000","fb_width":1440,
+                              "fb_height":3040,"fb_stride":5760}
+          print("PASS: full XNU with pinned prior on-device DTB, 1GiB highmem candidate and RAM-only root")
+          PY
+          (cd coral-full-candidate && sha256sum -c coral-full-flame-RAM-UNTESTED-engineering/SHA256SUMS) || {
+            (cd coral-full-candidate && sha256sum coral-full-flame-RAM-UNTESTED.img)
+            exit 1
+          }
+      - name: Package this experimental image only, not firmware or phone-partition tool
+        run: |
+          cp coral-full-candidate/coral-full-flame-RAM-UNTESTED-engineering/manifest.json coral-full-candidate/manifest.json
+          cat > coral-full-candidate/README.txt <<'EOF'
+          CORAL FULL FLAME XNU + RAM HFS TEST, EXPERIMENTAL PHYSICAL DEVICE CANDIDATE
+          Pixel 4 XL (coral) ONLY. NOT YET HARDWARE TESTED.
+          This does NOT contain Apple launchd, dyld or SpringBoard.
+          Full XNU based on Flame patch series 0124, with Adreno output disabled.
+          md0 RAM root, rootrw=0, ufsrw=0, sweetgpu=0; no user partition touched.
+          Boot only by temporary fastboot boot after backup/product and checksum checks.
+          NEVER flash this boot image to boot_a, boot_b or any other partition.
+          Device could hang/panic; no automatic Android restart guarantee.
+          Underlying DTB is from the prior photographed Phase11 working boot image.
+          1GiB high-memory span inferred from prior Coral probe, not full carveout certified.
+          EOF
+          (cd coral-full-candidate && sha256sum coral-full-flame-RAM-UNTESTED.img > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coral-full-flame-RAM-UNTESTED
+          path: |
+            coral-full-candidate/coral-full-flame-RAM-UNTESTED.img
+            coral-full-candidate/SHA256SUMS
+            coral-full-candidate/manifest.json
+            coral-full-candidate/README.txt
+          retention-days: 14
+          if-no-files-found: error
